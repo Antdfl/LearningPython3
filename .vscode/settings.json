@@ -1,0 +1,14 @@
+{
+    "cSpell.words": [
+        "colorgram",
+        "exitonclick",
+        "hirst"
+    ],
+    "python.defaultInterpreterPath": "E:\\code\\LearningPython\\.venv\\Scripts\\python.exe",
+    "python.analysis.extraPaths": [
+        "E:\\code\\LearningPython\\.venv\\Lib\\site-packages"
+    ],
+    "python.terminal.activateEnvironment": true,
+    "python.analysis.useImportHeuristic": true,
+    "python.analysis.typeCheckingMode": "off"
+}
