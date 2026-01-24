@@ -39,3 +39,18 @@
 - Using and creating generators
 - Introduction to exceptions
 - Using exceptions and try-except
+  
+## Python100dayCourse Bootcamp
+- Working with pandas library (Dataframes and Series)
+- List comprehension (+conditional)
+- Dictionary comprehension (+conditional)
+- Tkinter graphical interface library and its different layout managers.
+- Advanced function arguments (*args and **kwargs)
+- How to load, save and update json files.
+- Email SMTP and datetime library.
+- HTTP codes and exceptions and json data.
+- How to make APIs calls, keys, paramters and authentication.
+- HTML entities and how to unescape them.
+- Python typing: type hints and arrows
+- Environment variables
+- 
