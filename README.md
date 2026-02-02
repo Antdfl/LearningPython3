@@ -17,7 +17,7 @@ I'm documenting my progress publicly as I build hands-on projects, experiment wi
 
 ---
 
-## 🎯 Current Focus (2024-2025)
+## 🎯 Current Focus (2025-2026)
 
 **Learning & Building:**
 - 🐍 **Python** for data processing, APIs, and automation (intermediate level)
