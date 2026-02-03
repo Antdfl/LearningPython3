@@ -7,7 +7,8 @@ def resource_path(relative_path):
     try:
         base_path = sys._MEIPASS # pyright:ignore
     except Exception:
-        base_path = os.path.abspath(".")
+        # When not bundled by PyInstaller, use the directory of this file
+        base_path = os.path.dirname(os.path.abspath(__file__))
 
     return os.path.join(base_path, relative_path)
 # ---------------------------- CONSTANTS ------------------------------- #
