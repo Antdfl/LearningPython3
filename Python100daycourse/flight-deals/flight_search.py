@@ -2,6 +2,8 @@ import requests
 import os
 from datetime import datetime
 from dotenv import load_dotenv
+
+# Amadeus test API endpoints used for location lookup, flight search, and OAuth token.
 IATA_ENDPOINT = "https://test.api.amadeus.com/v1/reference-data/locations/cities"
 FLIGHT_ENDPOINT = "https://test.api.amadeus.com/v2/shopping/flight-offers"
 TOKEN_ENDPOINT = "https://test.api.amadeus.com/v1/security/oauth2/token"
@@ -9,13 +11,15 @@ TOKEN_ENDPOINT = "https://test.api.amadeus.com/v1/security/oauth2/token"
 load_dotenv()
 
 class FlightSearch:
-    #This class is responsible for talking to the Flight Search API.
+    # This class is responsible for talking to the Flight Search API.
     def __init__(self):
+        # Load API credentials from environment and fetch an access token up front.
         self._api_key = os.environ["AMADEUS_API_KEY"]
         self._api_secret = os.environ["AMADEUS_API_SECRET"]
         self._token = self._get_new_token()
 
     def get_destination_code(self, city_name):
+        # Look up a city name and return its IATA airport/city code.
         print(f"city_name: {city_name}")
         headers = {"Authorization": f"Bearer {self._token}"}
         input_data = {
@@ -26,6 +30,7 @@ class FlightSearch:
         response = requests.get(url=IATA_ENDPOINT, params=input_data, headers=headers)
         print(f"Status code {response.status_code}. Airport IATA: {response.text}")
         try:
+            # Amadeus returns a list of matches; take the first result's IATA code.
             code = response.json()["data"][0]['iataCode']
         except IndexError:
             print(f"IndexError: No airport code found for {city_name}.")
@@ -36,6 +41,7 @@ class FlightSearch:
         return code
 
     def _get_new_token(self):
+        # Request a new OAuth access token using the client credentials flow.
         header = {
             'Content-Type': 'application/x-www-form-urlencoded'
         }
@@ -69,6 +75,7 @@ class FlightSearch:
         """
 
         # print(f"Using this token to check_flights() {self._token}")
+        # Build the search query and call the flight offers endpoint.
         headers = {"Authorization": f"Bearer {self._token}"}
         query = {
             "originLocationCode": origin_city_code,
@@ -88,6 +95,7 @@ class FlightSearch:
         )
 
         if response.status_code != 200:
+            # Log error details and return None so callers can handle failure.
             print(f"check_flights() response code: {response.status_code}")
             print("There was a problem with the flight search.\n"
                   "For details on status codes, check the API documentation:\n"
@@ -96,4 +104,5 @@ class FlightSearch:
             print("Response body:", response.text)
             return None
 
+        # Successful response JSON contains the flight offers data.
         return response.json()

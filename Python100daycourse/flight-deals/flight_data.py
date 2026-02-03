@@ -49,6 +49,7 @@ def find_cheapest_flight(data):
     cheapest_flight = FlightData(lowest_price, origin, destination, out_date, return_date)
 
     for flight in data["data"]:
+        # Compare each offer's total price and update when a cheaper one is found.
         price = float(flight["price"]["grandTotal"])
         if price < lowest_price:
             lowest_price = price
@@ -59,4 +60,5 @@ def find_cheapest_flight(data):
             cheapest_flight = FlightData(lowest_price, origin, destination, out_date, return_date)
             print(f"Lowest price to {destination} is £{lowest_price}")
 
+    # Return the cheapest flight found (or the initial default if none were cheaper).
     return cheapest_flight
