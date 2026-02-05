@@ -32,6 +32,7 @@ sheet_data  = data_manager.get_destination_data()
 tomorrow = datetime.now() + timedelta(days=1)
 six_month_from_today = datetime.now() + timedelta(days=(6 * 30))
 
+
 for destination in sheet_data:
     # Search for direct flights
     print(f"Getting data for {destination['city']}....")
@@ -44,7 +45,6 @@ for destination in sheet_data:
     #print(f"flights {flights}")
     cheapest_flight = find_cheapest_flight(flights)
     print(f"{destination['city']}: £{cheapest_flight.price}")
-
 
     # ==================== Search for indirect flight if N/A ====================
     if  cheapest_flight.price == "N/A":
@@ -65,14 +65,19 @@ for destination in sheet_data:
         #                      f"from {cheapest_flight.origin_airport} to {cheapest_flight.destination_airport}, "
         #                      f"on {cheapest_flight.out_date} until {cheapest_flight.return_date}.")
         # Slowing down requests to avoid rate limit
-        try:
-            notification_manager.send_whatsapp(
-                message_body=f"Low price alert! Only £{cheapest_flight.price} to fly "
-                             f"from {cheapest_flight.origin_airport} to {cheapest_flight.destination_airport}, "
-                             f"on {cheapest_flight.out_date} until {cheapest_flight.return_date}."
-            )
-        except Exception as e:
-            print(e)
+        #
+        # In your main.py, craft a different message depending on whether
+        # the flight is direct or has a stopover.
+        if cheapest_flight.stops == 0:
+            message_body = f"Low price alert! Only £{cheapest_flight.price} to fly " \
+                           f"from {cheapest_flight.origin_airport} to {cheapest_flight.destination_airport}, " \
+                           f"on {cheapest_flight.out_date} until {cheapest_flight.return_date}."
+        else:
+            message_body = f"Low price alert! Only £{cheapest_flight.price} to fly " \
+                           f"from {cheapest_flight.origin_airport} to {cheapest_flight.destination_airport}, " \
+                           f"on {cheapest_flight.out_date} until {cheapest_flight.return_date} with {cheapest_flight.stops} stop(s)."
+        customer_email_list = data_manager.get_customer_emails()
+        notification_manager.send_emails(message_body, customer_email_list)
 
     time.sleep(2)
 
