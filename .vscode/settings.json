@@ -3,7 +3,9 @@
         "colorgram",
         "dotenv",
         "exitonclick",
-        "hirst"
+        "Favourite",
+        "hirst",
+        "País"
     ],
     "python.defaultInterpreterPath": "E:\\code\\LearningPython\\.venv\\Scripts\\python.exe",
     "python.analysis.extraPaths": [
