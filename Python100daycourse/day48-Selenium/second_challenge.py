@@ -4,7 +4,7 @@ from selenium.webdriver.common.keys import Keys
 import os
 os.system('cls')
 
-# Keep the brwoser open after the script finishes
+# Keep the browser open after the script finishes
 options = webdriver.ChromeOptions()
 options.add_experimental_option("detach", True)
 
@@ -23,4 +23,3 @@ email_field.send_keys("p@p.com")
 #submit_button = driver.find_element(By.XPATH, value="/html/body/form/button[1]")
 submit_button = driver.find_element(By.CSS_SELECTOR, value="form button")
 submit_button.click()
-s

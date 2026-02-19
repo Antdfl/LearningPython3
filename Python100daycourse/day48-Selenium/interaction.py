@@ -4,7 +4,7 @@ from selenium.webdriver.common.keys import Keys
 import os
 os.system('cls')
 
-# Keep the brwoser open after the script finishes
+# Keep the browser open after the script finishes
 options = webdriver.ChromeOptions()
 options.add_experimental_option("detach", True)
 
