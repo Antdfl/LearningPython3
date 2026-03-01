@@ -7,6 +7,9 @@
   <body>
     <h1>My Library</h1>
     <ul>
+      {% if not books %}
+      <li>No books in the library yet.</li>
+      {% endif %}
       {% for book in books %}
       <li>{{ book.title }} by {{ book.author }} - Rating: {{ book.rating }}</li>
       {% endfor %}
