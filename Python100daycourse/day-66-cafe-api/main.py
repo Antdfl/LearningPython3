@@ -3,6 +3,7 @@ from flask import Flask, jsonify, render_template, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Boolean
+from sqlalchemy.exc import NoResultFound
 from pathlib import Path
 import os
 
@@ -106,7 +107,16 @@ def add_cafe():
 
 
 # HTTP PUT/PATCH - Update Record
-
+@app.route("/update-price/<cafe_id>", methods=["PATCH"])
+def patch_cafe(cafe_id):
+    try:
+        cafe = db.session.execute(db.select(Cafe).where(Cafe.id == cafe_id)).scalar_one()
+    except NoResultFound:
+        return jsonify(error={"Not Found": "Sorry, a cafe with that id was not found in the database."}),404
+    else:
+        cafe.coffee_price = request.args.get("new_price")
+        db.session.commit()
+        return jsonify(response={"success": "Successfully updated the price."}), 200    
 # HTTP DELETE - Delete Record
 
 
