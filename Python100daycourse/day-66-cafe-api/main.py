@@ -4,8 +4,11 @@ from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import Integer, String, Boolean
 from sqlalchemy.exc import NoResultFound
+from werkzeug.exceptions import NotFound
 from pathlib import Path
 import os
+
+
 
 cls = os.system('cls' if os.name == 'nt' else 'clear')
 
@@ -117,8 +120,24 @@ def patch_cafe(cafe_id):
         cafe.coffee_price = request.args.get("new_price")
         db.session.commit()
         return jsonify(response={"success": "Successfully updated the price."}), 200    
+    
 # HTTP DELETE - Delete Record
-
+@app.route("/report-closed/<cafe_id>", methods=["DELETE"])
+def delete_cafe(cafe_id):
+    api_key = request.args.get("api-key")
+    print(api_key)
+    if api_key == "TopSecretAPIKey":
+       try:
+           print("Trying to find cafe with id:", cafe_id)
+           cafe = db.get_or_404(Cafe, cafe_id)
+       except NotFound:
+          return jsonify(error={"Not Found": "Sorry a cafe with that id wasn't found in the database."}), 404
+       else:
+           db.session.delete(cafe)
+           db.session.commit()
+           return jsonify(response={"success": "Successfully deleted the cafe from the database."}), 200
+    else:
+        return jsonify(error={"Forbidden": "Sorry. That's not allowed. Make sure you have the correct api-key."}), 403 
 
 if __name__ == '__main__':
     app.run(debug=True)
