@@ -8,16 +8,20 @@ from wtforms import StringField, SubmitField
 from wtforms.validators import DataRequired, URL
 from flask_ckeditor import CKEditor, CKEditorField
 from datetime import date
+from pathlib import Path
 
+
+db_path = Path(__file__).parent / "instance/posts.db"
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
 Bootstrap5(app)
+CKEditor(app)
 
 # CREATE DATABASE
 class Base(DeclarativeBase):
     pass
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///posts.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
@@ -40,18 +44,47 @@ with app.app_context():
 @app.route('/')
 def get_all_posts():
     # TODO: Query the database for all the posts. Convert the data to a python list.
-    posts = []
-    return render_template("index.html", all_posts=posts)
+    result = db.session.execute(db.select(BlogPost).order_by(BlogPost.title))
+    all_posts = result.scalars().all()
+    return render_template("index.html", all_posts=all_posts)
 
 # TODO: Add a route so that you can click on individual posts.
-@app.route('/')
+@app.route('/post/<int:post_id>')
 def show_post(post_id):
     # TODO: Retrieve a BlogPost from the database based on the post_id
-    requested_post = "Grab the post from your database"
+    result = db.session.execute(db.select(BlogPost).where(BlogPost.id == post_id))
+    requested_post = result.scalar()
     return render_template("post.html", post=requested_post)
 
 
 # TODO: add_new_post() to create a new blog post
+class CreatePostForm(FlaskForm):
+    title = StringField("Blog Post Title", validators=[DataRequired()])
+    subtitle = StringField("Subtitle", validators=[DataRequired()])
+    author = StringField("Author Name", validators=[DataRequired()])
+    img_url = StringField("Background Image URL", validators=[DataRequired(), URL()])
+    body = CKEditorField("Blog Content", validators=[DataRequired()])
+    submit = SubmitField("Submit Post")
+
+
+@app.route('/new-post', methods=["GET", "POST"])
+def add_new_post():
+    form = CreatePostForm()
+    if form.validate_on_submit():
+        new_post = BlogPost(
+            title=form.title.data,
+            subtitle=form.subtitle.data,
+            date=date.today().strftime("%B %d, %Y"),
+            body=form.body.data,
+            author=form.author.data,
+            img_url=form.img_url.data
+        )
+        db.session.add(new_post)
+        db.session.commit()
+        return redirect(url_for('get_all_posts'))
+    return render_template("make-post.html", form=form)
+
+# TODO: edit_post() to change an existing blog post
 
 # TODO: edit_post() to change an existing blog post
 
