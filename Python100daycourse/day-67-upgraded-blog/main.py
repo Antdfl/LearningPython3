@@ -85,10 +85,27 @@ def add_new_post():
     return render_template("make-post.html", form=form)
 
 # TODO: edit_post() to change an existing blog post
-
-# TODO: edit_post() to change an existing blog post
+@app.route('/edit-post/<int:post_id>', methods=["GET", "POST"])
+def edit_post(post_id):
+    post = db.session.get(BlogPost, post_id)
+    form = CreatePostForm(obj=post)
+    if form.validate_on_submit():
+        post.title = form.title.data
+        post.subtitle = form.subtitle.data
+        post.body = form.body.data
+        post.author = form.author.data
+        post.img_url = form.img_url.data
+        db.session.commit()
+        return redirect(url_for('show_post', post_id=post.id))
+    return render_template("make-post.html", form=form, is_edit=True)
 
 # TODO: delete_post() to remove a blog post from the database
+@app.route('/delete-post/<int:post_id>')
+def delete_post(post_id):
+    post = db.session.get(BlogPost, post_id)
+    db.session.delete(post)
+    db.session.commit()
+    return redirect(url_for('get_all_posts'))
 
 # Below is the code from previous lessons. No changes needed.
 @app.route("/about")

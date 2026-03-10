@@ -24,8 +24,15 @@
       {% for post in all_posts %}
       <div class="post-preview">
         <a href="{{ url_for('show_post', post_id=post.id) }}">
-          <h2 class="post-title">{{ post.title }}</h2>
-          <h3 class="post-subtitle">{{ post.subtitle }}</h3>
+          <div class="d-flex justify-content-between align-items-center">
+            <div class="flex-grow-1">
+              <h2 class="post-title">{{ post.title }}</h2>
+              <h3 class="post-subtitle">{{ post.subtitle }}</h3>
+            </div>
+            <div>
+              <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-danger btn-sm">✘</a>
+            </div>
+          </div>
         </a>
         <!-- TODO: Add code to delete posts below -->
         <p class="post-meta">
