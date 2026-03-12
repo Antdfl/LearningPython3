@@ -82,18 +82,47 @@ def register():
 
 @app.route('/login', methods=["GET", "POST"])
 def login():
+    """
+    Handle user login functionality for both GET and POST requests.
+    For POST requests:
+    - Retrieves the user from the database by email address
+    - Verifies that both the user exists AND the password is correct
+    - Logs in the user and redirects to the secrets page on success
+    - Displays an error message and redirects back to login on failure
+    For GET requests:
+    - Renders the login page template
+    Returns:
+        Response: Rendered login template for GET requests, or redirect response for POST requests
+    Note on security (user and password check):
+    The condition checks both `user` AND `check_password_hash()` because:
+    - If only the password was checked without verifying the user exists first,
+      it would cause an AttributeError when trying to access `user.password` on a None object
+    - Additionally, checking user existence first prevents timing attacks where an attacker
+      could infer if an email is registered by measuring response time differences
+    - The combined check ensures we only proceed if both conditions are valid
+    """
     if request.method == "POST":
+        # Check if user exists in the database by searching for the email
         user = db.session.execute(db.select(User).where(User.email == request.form.get('email'))).scalar()
-        if user and check_password_hash(user.password, request.form.get('password')):
+        # Check password hash and user existence together to prevent errors and enhance security
+        if not user:
+            flash("That email does not exist, please try again.", 'login_error')
+            return redirect(url_for('login'))
+        elif not check_password_hash(user.password, request.form.get('password')):
+            flash("Password incorrect, please try again.", 'login_error')
+            return redirect(url_for('login'))
+        else:   
+            # Log in the user
             login_user(user)
+            # If 'next' parameter exists, redirect to that page, otherwise redirect to secrets
             return redirect(url_for('secrets'))
-        flash('Invalid email or password.')
-        return redirect(url_for('login'))
+    # If GET request, just render the login page
     return render_template("login.html")
 
 
 @app.route('/secrets')
 def secrets():
+    # an alternative way to check if the user is authenticated without using the @login_required decorator
     if not current_user.is_authenticated:
         flash('You need to log in to access this page.')
         return redirect(url_for('login'))
@@ -109,6 +138,7 @@ def logout():
 
 @app.route('/download')
 def download():
+    # an alternative way to check if the user is authenticated without using the @login_required decorator
     if not current_user.is_authenticated:
         flash('You need to log in to access this page.')
         return redirect(url_for('login'))
