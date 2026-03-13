@@ -2,7 +2,7 @@
 
 **Senior Database Architect | 25+ Years Oracle Expertise | Expanding into Modern Data Technologies**
 
-📍 Based in Italy | 🌐 Remote-first | 💬 English (C1), Spanish (B2)
+📍 Based in Italy | 🌐 Remote-first | 💬 English (C1), Spanish (C1)
 
 ---
 
@@ -145,13 +145,50 @@ I'm seeking **Senior Database Developer**, **Database Architect**, or **Backend 
 ## 📚 Repository Structure
 
 ```
-├── learning.md          # Detailed learning log and progress tracking
-├── projects/            # Hands-on Python projects
-│   ├── flight-deals/    # Flight Deal Finder (current)
-│   ├── api-extraction/  # Web API data extraction
-│   └── data-pipelines/  # ETL-style data processing
-├── exercises/           # Practice exercises and coding challenges
-└── notes/              # Technical notes and learnings
+├── learning.md                  # Curriculum notes and skills log
+├── Python100daycourse/          # 100 Days of Code bootcamp projects (Day 1–68+)
+│   ├── day1/ – day19/           # Python fundamentals, OOP basics, functions
+│   ├── day24/ – day25/          # File I/O, pandas, US States game
+│   ├── day29-password-manager/  # Tkinter GUI – password manager
+│   ├── day33/                   # API requests – ISS overhead notifier
+│   ├── day48-Selenium/          # Selenium web automation
+│   ├── day54-Hello-Flask/       # Flask routing, decorators, URL variables
+│   ├── day56-my-personal-site/  # Flask + HTML/CSS personal site
+│   ├── day57-Jinjia/            # Jinja2 templating, external API integration
+│   ├── day-57-blog-templating/  # Blog with Jinja2 templates
+│   ├── day58-Bootstrap*/        # Bootstrap 5 components and layout
+│   ├── day63-SQLAlchemy/        # Flask-SQLAlchemy ORM (full CRUD)
+│   ├── day-63-SQLite-database/  # Raw sqlite3 module operations
+│   ├── day-63-library-project-DB/ # Flask library app with SQLAlchemy
+│   ├── day-64-top-movies/       # Flask + SQLAlchemy + external API (TMDB)
+│   ├── day-66-cafe-api/         # RESTful API – full CRUD with Flask + SQLAlchemy
+│   ├── day-67-upgraded-blog/    # Blog with WTForms, CKEditor, Bootstrap5
+│   ├── day-68-flask-auth/       # Flask-Login authentication system
+│   ├── snake_game/              # OOP Snake (Turtle graphics)
+│   ├── PongGame/                # OOP Pong (Turtle graphics)
+│   ├── TurtleCrossing/          # Frogger-style game (Turtle graphics)
+│   ├── quizzler-app/            # Tkinter quiz application
+│   ├── flash-card-project/      # Tkinter flashcard learning app
+│   ├── pomodoro_app/            # Tkinter Pomodoro timer
+│   ├── flight-deals/            # Flight price monitor (Kiwi API + SMTP)
+│   ├── rain_alert/              # Weather API + Twilio SMS alerts
+│   ├── Musical_Time_Machine_Project/ # Billboard scraping + Spotify API
+│   ├── Amazon_Price_tracker/    # BeautifulSoup price scraping + email alerts
+│   ├── ISS_Overhead_Notifier/   # ISS position API + SMTP notification
+│   ├── habit_tracker/           # Habit tracking via Pixela API
+│   ├── workout_habit_tracker/   # Workout logging via API
+│   ├── NATO-alphabet/           # Pandas NATO alphabet translator
+│   ├── bs4-start/               # BeautifulSoup basics
+│   ├── Selenium _Gym_Booking_Automation_Challenge/ # Selenium gym automation
+│   └── Web Development Container/ # HTML/CSS exercises (sections 2–6)
+├── PCAP_preparation/            # Python Institute PCAP certification prep
+│   ├── modules/                 # Custom module creation (suml, prodl, __counter)
+│   ├── packages/extra/          # Nested package hierarchy (4-level deep)
+│   ├── Cesar_crypt_decrypt.py   # Caesar cipher – encryption/decryption
+│   ├── IBAN_verification.py     # IBAN validation algorithm (modulo 97)
+│   ├── string_practice.py       # Seven-segment display via dict/list structures
+│   └── testpg.py               # Pygame basics – window, event loop, font rendering
+└── Practice/                   # Standalone exercises and crash course material
 ```
 
 ---
@@ -164,10 +201,11 @@ I'm seeking **Senior Database Developer**, **Database Architect**, or **Backend 
 
 ### [Detailed Learning Progress →](/learning.md)
 
-The learning file contains comprehensive details of Python structures, exercises, and projects I'm actively working on. Updated regularly as I progress through the 100 Days of Code bootcamp and beyond.
+The learning file documents curriculum topics and skills from the Python Institute PCAP certification track and the 100 Days of Code bootcamp. Updated as progress advances.
 
-**Current Status:** Day 40/100 - API Integration & Data Processing
+**100 Days of Code:** Day 68/100 – Flask Authentication (Flask-Login, password hashing, protected routes)
+**PCAP Preparation:** Modules, packages, string algorithms, IBAN validation, pygame basics
 
 ---
 
-**Last Updated:** February 2026
+**Last Updated:** March 2026
