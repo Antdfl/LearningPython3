@@ -38,7 +38,7 @@ After 25 years architecting enterprise Oracle database solutions, I'm actively b
 - 🏅 **Oracle APEX Professional** (2024)
 - 🏅 **GitHub Copilot Certification** (July 2025)
 - 🏅 **Cambridge Advanced (CAE) - C1 English**
-- 🏅 **DELE C1 (by Instituto Cervantes) - C1 Spanish**(February 2026)
+- 🏅 **DELE C1 (by Instituto Cervantes) - C1 Spanish** (February 2026)
   
 ---
 
