@@ -42,7 +42,7 @@ After 25 years architecting enterprise Oracle database solutions, I'm actively b
   
 ---
 
-## 🚀 Current Learning Focus (2025)
+## 🚀 Current Learning Focus (2026)
 
 **Expanding Skills in Modern Technologies:**
 
