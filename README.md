@@ -137,7 +137,7 @@ I'm seeking **Senior Database Developer**, **Database Architect**, or **Backend 
 - Collaborative teams valuing both experience and continuous learning
 - Opportunities to apply database expertise while growing modern tech skills
 - Professional development support (certifications, training, conferences)
-- International environment (to leverage English C1, Spanish B2)
+- International environment (to leverage English C1, Spanish C1)
 
 **Availability:** Negotiable notice period
 
