@@ -6,3 +6,6 @@
 .idea/
 # Ignore chrome_profile folder which contains user data for ChromeDriver
 chrome_profile/
+*.db
+*.log
+.DS_Store
