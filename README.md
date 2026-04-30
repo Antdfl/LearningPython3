@@ -48,7 +48,7 @@ After 25 years architecting enterprise Oracle database solutions, I'm actively b
 
 ### Active Learning
 - 🐍 **Python for Data Engineering:** Pandas, API consumption, data processing pipelines
-- ☁️ **Cloud Platforms:** AWS, Oracle Cloud Infrastructure, cloud-native patterns
+- ☁️ **Cloud Platforms:** Oracle Cloud Infrastructure, cloud-native patterns
 - 🔧 **Modern Data Stack:** Learning dbt, Airflow, and distributed processing concepts
 - 🤖 **AI/ML Foundations:** Applying OCI AI certification to practical use cases
 
