@@ -11,8 +11,8 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from forms import CreatePostForm, RegisterForm, LoginForm, CommentForm
 import os
-from dotenv import load_dotenv
-load_dotenv()
+# from dotenv import load_dotenv
+# load_dotenv()  # Remove for production
 # Optional: add contact me email functionality (Day 60)
 # import smtplib
 
@@ -32,7 +32,10 @@ This will install the packages from the requirements.txt for this project.
 
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] =  os.environ.get('FLASK_KEY')
+app.config['SECRET_KEY'] = os.environ.get(
+    'FLASK_KEY',
+    '8BYkEfBA6O6donzWlSihBXox7C0sKR6b'
+)
 ckeditor = CKEditor(app)
 Bootstrap5(app)
 
@@ -46,6 +49,16 @@ def load_user(user_id):
     return db.get_or_404(User, user_id)
 
 
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    return render_template('500.html'), 500
+
+
 @app.template_filter('gravatar')
 def gravatar_filter(email, size=100, rating='g', default='retro'):
     hash_val = hashlib.md5(email.lower().strip().encode()).hexdigest()
@@ -54,7 +67,28 @@ def gravatar_filter(email, size=100, rating='g', default='retro'):
 # CREATE DATABASE
 class Base(DeclarativeBase):
     pass
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DB_URI')
+
+def get_database_uri():
+    env_keys = [
+        'POSTGRES_URI',
+        'DB_URI',
+        'DATABASE_URL',
+        'SQLALCHEMY_DATABASE_URI',
+    ]
+    for env_key in env_keys:
+        uri = os.environ.get(env_key)
+        if uri:
+            if uri.startswith('postgres://'):
+                uri = uri.replace('postgres://', 'postgresql://', 1)
+            app.logger.warning('DB URI from %s: %s', env_key, uri.split('@')[-1])
+            return uri
+    app.logger.warning('No DB env var found, falling back to SQLite')
+    return 'sqlite:///./instance/posts.db'
+
+app.config['SQLALCHEMY_DATABASE_URI'] = get_database_uri()
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'connect_args': {'options': '-csearch_path=public'}}
+
 db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
