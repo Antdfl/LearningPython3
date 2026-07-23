@@ -9,3 +9,4 @@ chrome_profile/
 *.db
 *.log
 .DS_Store
+.clinerules
