@@ -582,7 +582,14 @@ img { max-width: 100%; height: auto; }
 """
 
 def slugify(text):
-    """Turns heading text into a safe, unique-able anchor id."""
+    """Convert heading text to a safe, unique anchor ID.
+
+    FIX: Previously, TOC links calculated the anchor from text using a
+    different rule than the one used to generate IDs on headings, so they
+    never matched. Now both <a href="#..."> from TOC and heading IDs pass
+    through this single function (with duplicate handling done by caller),
+    so they always stay aligned.
+    """
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
     text = re.sub(r'[^\w\s-]', '', text).strip().lower()
     text = re.sub(r'[-\s]+', '-', text)
@@ -631,13 +638,12 @@ if body_html is not None:
         if level in (1, 2, 3):
             toc_entries.append((level, display_html, anchor_id))
 
-        # xhtml2pdf (reportlab) risolve i link interni solo tramite un tag
-        # <a name="..."> vuoto usato come bersaglio - l'attributo name su h1..h6
-        # viene ignorato. Lo anteponiamo per rendere il TOC cliccabile nel PDF,
-        # mantenendo id="..." per i link nell'HTML.
-        # Un <a name="..."> del tutto vuoto puo' essere scartato dal motore di
-        # rendering di xhtml2pdf (problema noto): uno spazio non-breaking lo
-        # mantiene come flowable reale, cosi' il link diventa cliccabile.
+        # FIX: PDF links were broken because xhtml2pdf (reportlab engine) ignores
+        # the name="..." attribute set directly on h1..h6 - it only recognizes a
+        # standalone <a name="..."> tag as an internal link target, and discards
+        # empty ones during rendering (known bug). So we prepend the anchor tag
+        # with a non-breaking space inside: id="..." is used as the target for
+        # links in HTML export, while <a name="..."> makes PDF links clickable.
         return (
             f'<a name="{anchor_id}">&nbsp;</a>'
             f'<h{level} id="{anchor_id}" class="anchor">{display_html}</h{level}>'
