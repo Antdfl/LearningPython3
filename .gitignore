@@ -10,3 +10,4 @@ chrome_profile/
 *.log
 .DS_Store
 .clinerules
+utilities/tesseract/
