@@ -12,7 +12,7 @@ import sys, re, unicodedata, os
 from pathlib import Path
 
 
-# ── Assemble the HTML document with hierarchical TOC ──
+# ── Helper comments section ──
 
 
 def _missing(pip_name):
@@ -186,27 +186,42 @@ def build_toc(doc, toc_entries):
 
 
 def create_word_from_md(md_text, output_path):
-    """Creates a Word document (.docx) from Markdown with TOC support.
+    """
+    Creates a Microsoft Word document (.docx) from Markdown source with automatic
+    Table of Contents (TOC) generation. Supports all standard Markdown syntax
+    including headings, lists, tables, images, links, and code blocks.
+
+    TOC Features:
+    - Automatically numbered headings (1, 1.1, 1.1.1 format)
+    - Clickable TOC with hyperlinks to each section
+    - Hierarchical indentation matching heading levels
 
     Supported Markdown features:
-    - Headings: # h1, ## h2, ### h3, #### h4, ##### h5, ###### h6 (hierarchically numbered 1, 1.1, 1.1.1...)
-    - Clickable table of contents at the beginning (pre-populated)
-    - Regular paragraphs
+    - Headings: # h1, ## h2, ### h3, #### h4, ##### h5, ###### h6
     - Unordered lists (- or *)
     - Ordered lists (1., 2., ...)
-    - Bold (**text**)
-    - Italic (*text*)
+    - Bold (**text**) and Italic (*text*)
     - Inline code (`code`)
-    - Tables
+    - Tables with header rows
     - Links [text](url)
     - Images ![alt](path)
+
+    Args:
+        md_text (str): The full Markdown content as a string
+        output_path (Path): Path where the .docx file will be saved
     """
     def split_table_row(row_line):
+        # Helper: splits a markdown table row by '|' into individual cell content
         parts = row_line.split('|')
+        
+        # Remove empty first column (common pattern in markdown tables)
         if parts and parts[0].strip() == '':
             parts = parts[1:]
+        
+        # Remove empty last column if present
         if parts and parts[-1].strip() == '':
             parts = parts[:-1]
+        
         return [p.strip() for p in parts]
 
     try:
@@ -225,41 +240,52 @@ def create_word_from_md(md_text, output_path):
             line = line_stripped.strip()
 
             if not line:
+                # Skip empty lines (no paragraph needed)
                 i += 1
                 continue
 
-            # Check for Markdown tables
+            # ── Markdown Tables Detection ──
+            # Detect table syntax: row containing '|' with a separator header row above it
             if '|' in line and not line.startswith('#'):
+                # Look ahead at the next line to find the separator (header divider) pattern
                 next_line = lines[i + 1].strip() if i + 1 < num_lines else ''
                 sep_cells = split_table_row(next_line) if next_line else []
+                
+                # Check if this is a markdown table separator row (e.g., "|-|---|---:")
                 is_separator = bool(sep_cells) and all(
                     re.match(r'^:?-+:?$', c) for c in sep_cells if c != ''
                 ) and any(c != '' for c in sep_cells)
 
                 if is_separator:
+                    # This is a header separator, now extract the header row above it
                     header_cells = split_table_row(line)
                     num_cols = len(header_cells)
 
+                    # Collect all data rows below until we hit another table section or non-table line
                     body_rows = []
                     j = i + 2
                     while j < num_lines and '|' in lines[j].strip():
                         body_rows.append(split_table_row(lines[j].strip()))
                         j += 1
 
+                    # Create the Word table with header and body rows
                     table = doc.add_table(rows=1 + len(body_rows), cols=num_cols)
                     table.style = 'Table Grid'
 
+                    # Fill in header cells (first row)
                     for k, cell_text in enumerate(header_cells[:num_cols]):
                         table.rows[0].cells[k].text = cell_text
 
+                    # Fill in body cells (data rows)
                     for r, cells in enumerate(body_rows, start=1):
                         for k, cell_text in enumerate(cells[:num_cols]):
                             table.rows[r].cells[k].text = cell_text
 
-                    i = j
+                    i = j  # Move to next section
                     continue
 
-            # Images ![alt](path)
+            # ── Images ![alt](path) ──
+            # Detect markdown image syntax and convert to plain text description
             img_match = re.match(r'^!\[([^\]]*)\]\(([^)]+)\)$', line_stripped)
             if img_match:
                 alt_text = img_match.group(1)
@@ -268,7 +294,8 @@ def create_word_from_md(md_text, output_path):
                 i += 1
                 continue
 
-            # Links [text](url) - parse first to avoid ambiguity with headings
+            # ── Links [text](url) ──
+            # Detect markdown link syntax and convert to clickable-style text
             link_match = re.match(r'^\[([^\]]*)\]\(([^)]+)\)$', line_stripped)
             if link_match:
                 link_text = link_match.group(1)
@@ -277,7 +304,8 @@ def create_word_from_md(md_text, output_path):
                 i += 1
                 continue
             
-            # Headings - supports h1 to h6 based on the number of #
+            # ── Headings (h1-h6) ──
+            # Detect markdown headings (# to ######) and convert to Word headings with bookmarks
             title_match = re.match(r'^(#{1,6})\s+(.+)$', line_stripped)
             if title_match:
                 level = len(title_match.group(1))
@@ -308,15 +336,18 @@ def create_word_from_md(md_text, output_path):
                     add_heading_bookmark(heading, bookmark_name, bookmark_counter)
                     toc_entries.append((level, numbered_text, bookmark_name))
                 elif level == 4:
+                    # Level 4 headings are too deep for TOC, render as custom paragraph
                     p = doc.add_paragraph()
                     run = p.add_run(title_clean)
                     run.font.name = 'Heading'
                     run.font.size = Pt(14)
                 elif level == 5:
+                    # Level 5 headings are very small detail headers
                     p = doc.add_paragraph()
                     run = p.add_run(title_clean)
                     run.font.size = Pt(12)
                 else:  # h6
+                    # Level 6 headings are fine print / footer-level text
                     p = doc.add_paragraph()
                     run = p.add_run(title_clean)
                     run.font.size = Pt(10)
@@ -324,7 +355,8 @@ def create_word_from_md(md_text, output_path):
                 i += 1
                 continue
 
-            # Unordered lists (- or *)
+            # ── Unordered Lists (-, *, +) ──
+            # Detect bullet point lists and add them as paragraphs
             ul_match = re.match(r'^(\s*[-*+]\s+)(.+)$', line_stripped)
             if ul_match:
                 list_item_text = ul_match.group(2).strip()
@@ -332,7 +364,8 @@ def create_word_from_md(md_text, output_path):
                 i += 1
                 continue
 
-            # Ordered lists (1., 2., ...)
+            # ── Ordered Lists (1., 2., 3...) ──
+            # Detect numbered lists and preserve the numbering
             ol_match = re.match(r'^(\d+)\.\s+(.+)$', line_stripped)
             if ol_match:
                 list_num = ol_match.group(1)
@@ -341,7 +374,8 @@ def create_word_from_md(md_text, output_path):
                 i += 1
                 continue
 
-            # Quoted text / Blockquotes
+            # ── Blockquotes (") ──
+            # Detect quoted text and add with Quote style in Word
             quote_match = re.match(r'^"(.+)"$', line_stripped)
             if quote_match:
                 quote_text = quote_match.group(1).replace('"', '"')
@@ -349,19 +383,24 @@ def create_word_from_md(md_text, output_path):
                 i += 1
                 continue
             
-            # Inline code (`code`)
+            # ── Inline Code (`code`) ──
+            # Detect markdown inline code and wrap in HTML <code> tags
             code_inline = re.sub(r'`([^`]+)`', r'<code>\1</code>', line_stripped)
             
-            # Bold (**text**)
+            # ── Bold Text (**text**) ──
+            # Detect bold formatting and convert to HTML <strong> tags
             bold_inline = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', code_inline)
             
-            # Italic (*text*)
+            # ── Italic Text (*text*) ──
+            # Detect italic formatting and convert to HTML <em> tags
             italic_inline = re.sub(r'\*(.+?)\*', r'<em>\1</em>', bold_inline)
             
-            # Remove HTML tags (if present) before adding paragraph
+            # ── Clean HTML Tags ──
+            # Remove any raw HTML tags that were in the original markdown
             clean_text = re.sub(r'<[^>]+>', '', italic_inline)
             
-            # Normal paragraph text
+            # ── Regular Paragraph Text ──
+            # Add remaining text as a regular paragraph (not heading/list/quote/etc.)
             if clean_text.strip():
                 p = doc.add_paragraph(clean_text)
 
