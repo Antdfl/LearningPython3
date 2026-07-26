@@ -12,3 +12,4 @@ chrome_profile/
 .clinerules
 utilities/tesseract/
 utilities/lessons_learned.md
+utilities/docs_prompt_template.md
