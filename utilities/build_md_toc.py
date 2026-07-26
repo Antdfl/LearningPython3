@@ -67,6 +67,138 @@ def convert_to_html(md_text):
     return markdown.markdown(md_text, extensions=['tables', 'sane_lists', 'nl2br'])
 
 
+# Printable width of the PDF page (A4 minus the left/right margins set in the
+# @page CSS rule below: 210mm page width - 16mm - 16mm margins), converted to
+# points. Used to give wide tables absolute (not percentage) column widths.
+_MM_TO_PT = 72 / 25.4
+PAGE_CONTENT_WIDTH_PT = (210 - 16 - 16) * _MM_TO_PT
+
+
+def _cell_text_len(cell_html):
+    """Returns the plain-text length of a table cell, tags stripped."""
+    return len(re.sub(r'<[^>]+>', '', cell_html).strip())
+
+
+def _longest_word_len(cell_html):
+    """Returns the length of the longest single (unbreakable) word in a cell.
+
+    xhtml2pdf can only wrap at whitespace, so a column can never be made
+    narrower than the widest single word it contains without the library
+    silently expanding that column (and overflowing the table past the
+    page's right margin) to fit it.
+    """
+    text = re.sub(r'<[^>]+>', '', cell_html).strip()
+    words = re.split(r'\s+', text)
+    return max((len(w) for w in words), default=0)
+
+
+def shrink_wide_tables(html_content, max_cols_before_shrink=6):
+    """Gives explicit per-column widths (and smaller font/padding) to tables
+    with many columns.
+
+    xhtml2pdf/reportlab compute column widths automatically from cell content.
+    With many narrow columns this auto-calculation can produce a negative
+    available width and crash (ValueError: ... negative availWidth ...).
+    Setting an explicit width on each header cell avoids that code path.
+
+    Widths are set in absolute points (derived from the page's printable
+    width) rather than percentages: xhtml2pdf resolves table-cell '%' widths
+    against the full page width, not the margin-adjusted printable area, so
+    percentage widths cause the last column(s) to spill past the right margin.
+
+    Column widths are proportional to each column's content (the longest
+    cell text in that column), with a minimum floor, so text-heavy columns
+    (e.g. free-text notes) get more room than short numeric ones.
+    """
+    def process_table(match):
+        table_html = match.group(0)
+        header_row_match = re.search(r'<tr>(.*?)</tr>', table_html, flags=re.S)
+        if not header_row_match:
+            return table_html
+        num_cols = len(re.findall(r'<th\b', header_row_match.group(1)))
+        if num_cols <= max_cols_before_shrink:
+            return table_html
+
+        extra_cols = num_cols - max_cols_before_shrink
+        font_pt = max(6.0, 9.0 - extra_cols * 0.4)
+        pad_px = max(2, 6 - extra_cols)
+        # Rough Helvetica-Bold average glyph width, used to size each
+        # column's hard minimum from its longest unbreakable word.
+        char_width_pt = font_pt * 0.62
+        pad_pt = pad_px * 0.75 * 2  # px->pt, both sides
+
+        # Longest cell text / longest single word per column, over every row.
+        max_len = [0] * num_cols
+        max_word_len = [0] * num_cols
+        for row_match in re.finditer(r'<tr>(.*?)</tr>', table_html, flags=re.S):
+            cells = re.findall(r'<t[dh]\b[^>]*>(.*?)</t[dh]>', row_match.group(1), flags=re.S)
+            for col_idx, cell_html in enumerate(cells[:num_cols]):
+                max_len[col_idx] = max(max_len[col_idx], _cell_text_len(cell_html))
+                max_word_len[col_idx] = max(max_word_len[col_idx], _longest_word_len(cell_html))
+
+        # Slight safety margin (0.97) to absorb border/rounding overhead.
+        usable_width_pt = PAGE_CONTENT_WIDTH_PT * 0.97
+
+        # Hard floor: a column can never go below what its longest
+        # unbreakable word needs, or xhtml2pdf silently expands it anyway
+        # (overflowing the table past the page's right margin).
+        hard_min_pt = [
+            max(20.0, word_len * char_width_pt + pad_pt)
+            for word_len in max_word_len
+        ]
+
+        # Weight = content length with a floor, so empty/short columns don't
+        # collapse to nothing, and capped so one huge cell can't dominate.
+        weights = [max(6, min(length, 40)) for length in max_len]
+        total_weight = sum(weights)
+
+        total_hard_min = sum(hard_min_pt)
+        if total_hard_min >= usable_width_pt:
+            # Content is too wide even at the minimums: fall back to the
+            # hard minimums as-is (table will be as tight as it can be).
+            col_widths_pt = hard_min_pt
+        else:
+            extra_width_pt = usable_width_pt - total_hard_min
+            col_widths_pt = [
+                hard_min_pt[i] + extra_width_pt * weights[i] / total_weight
+                for i in range(num_cols)
+            ]
+
+        table_html = re.sub(
+            r'<table\b[^>]*>',
+            f'<table style="width:{PAGE_CONTENT_WIDTH_PT:.1f}pt;font-size:{font_pt:.1f}pt;">',
+            table_html,
+            count=1,
+        )
+
+        # Apply the width to every cell in every row (th AND td), not just
+        # the header: xhtml2pdf resets a column's width down to just its
+        # padding whenever it meets an EMPTY <td> with no explicit width,
+        # silently discarding the width set on the header. Giving every
+        # cell its own explicit width avoids that code path entirely.
+        def process_row(row_match):
+            row_html = row_match.group(0)
+            col_idx = {'i': 0}
+
+            def repl_cell(cell_match):
+                tag = cell_match.group(1)
+                inner = cell_match.group(2)
+                i = col_idx['i']
+                col_idx['i'] += 1
+                width = col_widths_pt[i] if i < len(col_widths_pt) else 20.0
+                return (
+                    f'<{tag} style="width:{width:.2f}pt;padding:{pad_px}px 4px;">'
+                    f'{inner}</{tag}>'
+                )
+
+            return re.sub(r'<(th|td)\b[^>]*>(.*?)</\1>', repl_cell, row_html, flags=re.S)
+
+        table_html = re.sub(r'<tr>.*?</tr>', process_row, table_html, flags=re.S)
+        return table_html
+
+    return re.sub(r'<table\b[^>]*>.*?</table>', process_table, html_content, flags=re.S)
+
+
 def html_to_pdf(html_content, output_path):
     """Converts an HTML string to a PDF file using the 'xhtml2pdf' library."""
     try:
@@ -464,6 +596,7 @@ needs_html = choice in ['H', 'P', 'A']
 body_html = None
 if needs_html and MARKDOWN_AVAILABLE:
     body_html = convert_to_html(md_text)
+    body_html = shrink_wide_tables(body_html)
 
 # ── CSS stylesheet for HTML/PDF rendering ──
 # Includes TOC styling and anchor links for clickable navigation
@@ -583,25 +716,29 @@ pre {
 }
 pre code { background: none; padding: 0; }
 
-table { 
-    width: 100%; 
-    border-collapse: collapse; 
-    margin: 8px 0 12px 0; 
-    font-size: 9pt; 
-    page-break-inside: avoid;
+table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+    margin: 8px 0 12px 0;
+    font-size: 9pt;
 }
-th { 
-    background: #eef3fb; 
-    color: #1e3c72; 
-    text-align: left; 
-    padding: 6px 8px; 
-    border: 1px solid #cdd9ec; 
-    font-weight: bold; 
+th {
+    background: #eef3fb;
+    color: #1e3c72;
+    text-align: left;
+    padding: 6px 8px;
+    border: 1px solid #cdd9ec;
+    font-weight: bold;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
-td { 
-    padding: 6px 8px; 
-    border: 1px solid #dde5f0; 
-    vertical-align: top; 
+td {
+    padding: 6px 8px;
+    border: 1px solid #dde5f0;
+    vertical-align: top;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 blockquote { 
