@@ -83,23 +83,27 @@ def register():
 @app.route('/login', methods=["GET", "POST"])
 def login():
     """
-    Handle user login functionality for both GET and POST requests.
-    For POST requests:
-    - Retrieves the user from the database by email address
-    - Verifies that both the user exists AND the password is correct
-    - Logs in the user and redirects to the secrets page on success
-    - Displays an error message and redirects back to login on failure
-    For GET requests:
-    - Renders the login page template
+    Handles user authentication (Login). This function processes incoming requests 
+    to either display the login form (GET) or attempt credential verification (POST).
+
+    SECURITY NOTES:
+    1. Existence and Password Check: The logic combines checking for user existence
+       AND verifying the password hash (`check_password_hash`) into a single conditional
+       block. This pattern is crucial to prevent both Python `AttributeError`s 
+       and potential timing attacks that an attacker could exploit by measuring response time differences.
+    2. State Management: Uses Flask-Login's `login_user()` and redirects upon success, 
+       ensuring the user session is properly established.
+
+    FLOW LOGIC:
+    - GET Request: Renders the 'login.html' template, displaying an empty form for input.
+    - POST Request: 
+      1. Attempts to fetch a User object by email from the database.
+      2. If the user does not exist OR the provided password fails validation: 
+         Displays a generic failure message (for security) and redirects back to GET /login.
+      3. On success: Logs in the user, flashes a success message, and redirects them to the protected 'secrets' page.
+
     Returns:
-        Response: Rendered login template for GET requests, or redirect response for POST requests
-    Note on security (user and password check):
-    The condition checks both `user` AND `check_password_hash()` because:
-    - If only the password was checked without verifying the user exists first,
-      it would cause an AttributeError when trying to access `user.password` on a None object
-    - Additionally, checking user existence first prevents timing attacks where an attacker
-      could infer if an email is registered by measuring response time differences
-    - The combined check ensures we only proceed if both conditions are valid
+        Response: The rendered login template for GET requests or a redirect response for POST requests.
     """
     if request.method == "POST":
         # Check if user exists in the database by searching for the email
