@@ -1,12 +1,30 @@
 #!/usr/bin/env python3
 """
-Converts a .md file to HTML, PDF, and/or DOCX (Word) with clickable TOC after H1.
-On startup it asks whether to generate HTML, PDF, DOCX, or all three formats.
+utilities/build_md_toc.py
 
-Menu: H = HTML only (.html), P = PDF only (.pdf), W = Word only (.docx), A = All three formats
+# Purpose: This module provides utilities for converting Markdown (.md) files into multiple document 
+# formats (HTML, PDF, DOCX). It is designed to handle complex features like automatic Table of Contents (TOC) generation.
 
-NEW FEATURE: Adds a clickable Table of Contents (TOC) right after the first H1 heading
-for both HTML and PDF formats. The Word format already has TOC support built-in.
+# Audience Note for Junior Programmers:
+# The conversion process involves several technical workarounds and external library dependencies 
+# (markdown, xhtml2pdf, python-docx). Understanding the *why* behind these functions 
+# (e.g., why table widths must be explicitly set in CSS/XML) is crucial for maintenance.
+
+# Functionality Overview:
+# - Markdown to HTML: Converts markdown syntax to structured, styled HTML.
+# - TOC Generation (HTML/PDF): Dynamically finds H1-H3 headings, creates unique anchors, and builds a navigable TOC block placed after the first major heading.
+# - DOCX Generation: Uses advanced python-docx XML manipulation to create a Word document that contains proper internal field codes for an automatic TOC when opened in MS Word.
+
+# Conversion Menu:
+# H = HTML only (.html)
+# P = PDF only (.pdf): Requires xhtml2pdf and relies on the generated HTML structure.
+# W = Word only (.docx): Uses advanced DOCX XML manipulation for full functionality.
+# A = All three formats: Executes all supported conversions sequentially.
+
+# Dependencies (MUST be installed via pip): 
+# - markdown: Core Markdown parser.
+# - xhtml2pdf: For PDF conversion from HTML.
+# - python-docx: For Word document creation and XML manipulation.
 """
 import sys, re, unicodedata, os
 from pathlib import Path
@@ -16,7 +34,13 @@ from pathlib import Path
 
 
 def _missing(pip_name):
-    """Prints a helpful message when a required library is not installed."""
+    """
+    [Helper Function] Outputs an actionable warning message if a required third-party library 
+    is not available in the current Python environment.
+
+    Parameters:
+        pip_name (str): The name of the missing library package.
+    """
     print(f"Library '{pip_name}' not found. Install with: pip install {pip_name}")
 
 
@@ -49,12 +73,27 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def strip_frontmatter(md_text):
-    """Removes the initial YAML block (--- ... ---) if present."""
+    """
+    [Utility Function] Strips common YAML "Front Matter" blocks from the start of a Markdown file.
+
+    Front matter is used in many static site generators (e.g., Jekyll, Hugo) to store 
+    metadata like author, date, or version before the main content begins. It must be removed 
+    before parsing the core markdown text.
+
+    Parameters:
+        md_text (str): The raw Markdown content string read from disk.
+
+    Returns:
+        str: The cleaned Markdown text with the front matter block completely removed.
+    """
     lines = md_text.split('\n')
+    # Check if the first line is the start delimiter '---'.
     if lines and lines[0].strip() == '---':
         for idx in range(1, len(lines)):
+            # Found the closing delimiter '---'. Everything after this point is content.
             if lines[idx].strip() == '---':
                 return '\n'.join(lines[idx + 1:]).lstrip('\n')
+    # If no front matter structure was found, return the original text unchanged.
     return md_text
 
 
@@ -75,20 +114,41 @@ PAGE_CONTENT_WIDTH_PT = (210 - 16 - 16) * _MM_TO_PT
 
 
 def _cell_text_len(cell_html):
-    """Returns the plain-text length of a table cell, tags stripped."""
+    """
+    [Utility] Strips all HTML tags from a given cell's content and returns 
+    the remaining plaintext length. This is used for calculating content-based column widths.
+
+    Parameters:
+        cell_html (str): The raw HTML string of the table cell.
+
+    Returns:
+        int: Length of the visible text content after stripping all tags.
+    """
+    # Regex Explanation: <[^>]+> matches any sequence starting with < and ending with > 
+    # (i.e., a complete HTML tag). We substitute these matches with nothing ('') to strip them out.
     return len(re.sub(r'<[^>]+>', '', cell_html).strip())
 
 
 def _longest_word_len(cell_html):
-    """Returns the length of the longest single (unbreakable) word in a cell.
-
-    xhtml2pdf can only wrap at whitespace, so a column can never be made
-    narrower than the widest single word it contains without the library
-    silently expanding that column (and overflowing the table past the
-    page's right margin) to fit it.
     """
+    [Utility] Calculates the length of the longest continuous, unbreakable word within a table cell.
+
+    Critical Limitation Workaround: The xhtml2pdf/ReportLab PDF engine only wraps text at 
+    whitespace boundaries. Therefore, we must ensure that the minimum calculated column width 
+    is greater than or equal to the widest single word in that column, preventing crashes 
+    when the content is highly varied (e.g., a long URL vs. "A").
+
+    Parameters:
+        cell_html (str): The raw HTML string of the table cell.
+
+    Returns:
+        int: Length of the longest single word found in the cell's text content. Returns 0 if empty.
+    """
+    # Step 1: Strip all HTML tags to get pure text for analysis.
     text = re.sub(r'<[^>]+>', '', cell_html).strip()
+    # Step 2: Use regex splitting by one or more whitespace characters (\s+) to reliably extract word boundaries.
     words = re.split(r'\s+', text)
+    # Step 3: Calculate and return the maximum length found among all words.
     return max((len(w) for w in words), default=0)
 
 
