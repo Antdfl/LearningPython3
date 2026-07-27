@@ -13,3 +13,5 @@ chrome_profile/
 utilities/tesseract/
 utilities/lessons_learned.md
 utilities/docs_prompt_template.md
+*.ps1
+*.bat
