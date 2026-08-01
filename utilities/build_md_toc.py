@@ -384,47 +384,20 @@ def html_to_pdf(html_content, output_path):
         print(f"Cannot write to {output_path.name}: {e}")
 
 
-def add_heading_bookmark(paragraph, bookmark_name, bookmark_id):
-    """Adds a bookmark to a heading paragraph for Word TOC."""
-    p_elem = paragraph._p
-    start = OxmlElement('w:bookmarkStart')
-    start.set(qn('w:id'), str(bookmark_id))
-    start.set(qn('w:name'), bookmark_name)
-    end = OxmlElement('w:bookmarkEnd')
-    end.set(qn('w:id'), str(bookmark_id))
-    insert_at = 1 if len(p_elem) and p_elem[0].tag == qn('w:pPr') else 0
-    p_elem.insert(insert_at, start)
-    p_elem.append(end)
+def build_toc(doc, has_headings, insert_after=None):
+    """Builds a native, updatable Table of Contents field for Word documents.
 
-
-def build_toc_entry_paragraph(doc, level, text, bookmark_name):
-    """Creates a table of contents (TOC) entry paragraph for a heading."""
-    p = doc.add_paragraph()
-    p.paragraph_format.left_indent = Inches({1: 0, 2: 0.25, 3: 0.5}.get(level, 0.5))
-
-    hyperlink = OxmlElement('w:hyperlink')
-    hyperlink.set(qn('w:anchor'), bookmark_name)
-
-    run_el = OxmlElement('w:r')
-    rpr = OxmlElement('w:rPr')
-    color = OxmlElement('w:color')
-    color.set(qn('w:val'), '1e3c72')
-    underline = OxmlElement('w:u')
-    underline.set(qn('w:val'), 'single')
-    rpr.append(color)
-    rpr.append(underline)
-    run_el.append(rpr)
-    t = OxmlElement('w:t')
-    t.text = text
-    run_el.append(t)
-    hyperlink.append(run_el)
-
-    p._p.append(hyperlink)
-    return p
-
-
-def build_toc(doc, toc_entries, insert_after=None):
-    """Builds the Table of Contents (TOC) block for Word documents.
+    This inserts the real `{ TOC \\o "1-3" \\h \\z \\u }` field (wrapped in the
+    same docPartObj/"Table of Contents" content control Word itself uses),
+    with only a placeholder line as its cached result - no hand-built
+    hyperlinks or bookmarks. Word/LibreOffice both take ownership of a field
+    like this and rebuild its content themselves from the document's
+    Heading 1-3 paragraphs whenever the user updates it (F9 / right-click >
+    Update Field). Trying to pre-fill the cached result with our own
+    hyperlinks was tried and made things worse: both editors detected the
+    field, discarded our cached entries as stale, and produced a dead TOC
+    that couldn't even be regenerated with F9. Leaving it genuinely empty is
+    what makes the F9 update path (confirmed working by the user) kick in.
 
     Args:
         insert_after: xml element (e.g. a heading paragraph's ._p) the TOC block
@@ -432,7 +405,7 @@ def build_toc(doc, toc_entries, insert_after=None):
             title reads before the TOC instead of being pushed after it. Falls
             back to inserting at the very start of the document when None.
     """
-    if not toc_entries:
+    if not has_headings:
         return
 
     title_p = doc.add_paragraph()
@@ -440,41 +413,49 @@ def build_toc(doc, toc_entries, insert_after=None):
     title_run.font.size = Pt(18)
     title_run.font.bold = True
 
-    entry_paragraphs = [
-        build_toc_entry_paragraph(doc, level, text, bookmark_name)
-        for level, text, bookmark_name in toc_entries
-    ]
+    field_p = doc.add_paragraph()
+    field_p.paragraph_format.left_indent = Inches(0)
 
-    doc.add_page_break()
-
-    first_p = entry_paragraphs[0]._p
-    
+    r_begin = OxmlElement('w:r')
     fld_begin = OxmlElement('w:fldChar')
     fld_begin.set(qn('w:fldCharType'), 'begin')
-    r_begin = OxmlElement('w:r')
     r_begin.append(fld_begin)
 
+    r_instr = OxmlElement('w:r')
     instr_text = OxmlElement('w:instrText')
     instr_text.set(qn('xml:space'), 'preserve')
     instr_text.text = ' TOC \\o "1-3" \\h \\z \\u '
-    r_instr = OxmlElement('w:r')
     r_instr.append(instr_text)
 
+    r_separate = OxmlElement('w:r')
     fld_separate = OxmlElement('w:fldChar')
     fld_separate.set(qn('w:fldCharType'), 'separate')
-    r_separate = OxmlElement('w:r')
     r_separate.append(fld_separate)
 
-    insert_at = 1 if len(first_p) and first_p[0].tag == qn('w:pPr') else 0
-    for el in (r_separate, r_instr, r_begin):
-        first_p.insert(insert_at, el)
+    r_placeholder = OxmlElement('w:r')
+    rpr = OxmlElement('w:rPr')
+    italic = OxmlElement('w:i')
+    color = OxmlElement('w:color')
+    color.set(qn('w:val'), '888888')
+    rpr.append(italic)
+    rpr.append(color)
+    r_placeholder.append(rpr)
+    t_placeholder = OxmlElement('w:t')
+    t_placeholder.text = (
+        "Clic destro qui sopra e scegli \"Aggiorna campo\" (o seleziona il "
+        "testo e premi F9) per generare il sommario."
+    )
+    r_placeholder.append(t_placeholder)
 
-    last_p = entry_paragraphs[-1]._p
+    r_end = OxmlElement('w:r')
     fld_end = OxmlElement('w:fldChar')
     fld_end.set(qn('w:fldCharType'), 'end')
-    r_end = OxmlElement('w:r')
     r_end.append(fld_end)
-    last_p.append(r_end)
+
+    for el in (r_begin, r_instr, r_separate, r_placeholder, r_end):
+        field_p._p.append(el)
+
+    doc.add_page_break()
 
     sdt = OxmlElement('w:sdt')
     sdt_pr = OxmlElement('w:sdtPr')
@@ -489,8 +470,7 @@ def build_toc(doc, toc_entries, insert_after=None):
 
     sdt_content = OxmlElement('w:sdtContent')
     sdt_content.append(title_p._p)
-    for p in entry_paragraphs:
-        sdt_content.append(p._p)
+    sdt_content.append(field_p._p)
     sdt.append(sdt_content)
 
     body = doc.element.body
@@ -543,8 +523,7 @@ def create_word_from_md(md_text, output_path):
         doc = Document()
         
         h_counters = [0, 0, 0]
-        toc_entries = []
-        bookmark_counter = 0
+        has_headings = False
         title_element = None  # xml element of the first H1 (document title)
         
         lines = md_text.split('\n')
@@ -654,12 +633,8 @@ def create_word_from_md(md_text, output_path):
                         numbering = f"{h_counters[0]}.{h_counters[1]}.{h_counters[2]}"
 
                     numbered_text = f"{numbering} {title_clean}"
-                    heading = doc.add_heading(numbered_text, level=level)
-
-                    bookmark_counter += 1
-                    bookmark_name = f"_toc_bm_{bookmark_counter}"
-                    add_heading_bookmark(heading, bookmark_name, bookmark_counter)
-                    toc_entries.append((level, numbered_text, bookmark_name))
+                    doc.add_heading(numbered_text, level=level)
+                    has_headings = True
                 elif level == 4:
                     # Level 4 headings are too deep for TOC, render as custom paragraph
                     p = doc.add_paragraph()
@@ -731,7 +706,7 @@ def create_word_from_md(md_text, output_path):
 
             i += 1
 
-        build_toc(doc, toc_entries, insert_after=title_element)
+        build_toc(doc, has_headings, insert_after=title_element)
 
         doc.save(output_path)
         print(f"OK: {output_path.name}")
