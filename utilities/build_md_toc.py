@@ -97,6 +97,118 @@ def strip_frontmatter(md_text):
     return md_text
 
 
+def strip_md_toc(md_text):
+    """
+    [Utility Function] Strips a hand-written Markdown Table of Contents (TOC) from the
+    start of a document, so it does not duplicate the auto-generated TOC built later for
+    HTML/PDF/DOCX output.
+
+    Two TOC shapes are recognized, both searched for only near the top of the document
+    (right after the title, so real content lists elsewhere are never touched):
+
+    1. Heading-guarded: a heading like "## Contenuto" / "## Table of Contents" / "## Indice"
+       followed by a list of anchor links (e.g. "[Link](#id)").
+    2. Bare: a contiguous list of anchor links placed directly under the first H1 title,
+       with no introducing heading at all (this is what tools like Pandoc/VS Code TOC
+       extensions typically generate).
+
+    A run of list items is only treated as a real TOC if the large majority of its items
+    are anchor links, which avoids false positives on ordinary bullet lists.
+
+    IMPORTANT: The first H1 heading (the document title) is never removed, only the TOC
+    block that follows it.
+
+    Parameters:
+        md_text (str): The raw Markdown content string.
+
+    Returns:
+        str: The cleaned Markdown text with the TOC block removed, unchanged if none found.
+    """
+    lines = md_text.split('\n')
+
+    if not lines:
+        return md_text
+
+    total = len(lines)
+    # A hand-written TOC always sits near the very top of the document (right after the
+    # title), so we only look there. This keeps ordinary content lists further down
+    # (which may also happen to contain internal anchor links) untouched.
+    search_limit = min(total, 400)
+
+    # Heading text is anchored with \s*$ so a real title like "# Sommario del Progetto"
+    # is never mistaken for a bare TOC heading like "# Sommario".
+    heading_patterns = [
+        r'^#\s*Contenuto\s*$',
+        r'^#\s*Indice\s*$',
+        r'^#\s*Table\s+of\s+Contents\s*$',
+        r'^#\s*Sommario\s*$',
+        r'^##\s*Contenuto\s*$',
+        r'^##\s*Indice\s*$',
+        r'^##\s*Table\s+of\s+Contents\s*$',
+        r'^###\s*Contenuto\s*$',
+    ]
+
+    def is_list_item(s):
+        return bool(re.match(r'^\s*[-*+]\s+', s))
+
+    def is_anchor_list_item(s):
+        return bool(re.match(r'^\s*[-*+]\s+.*\[.+?\]\(#.*?\)', s))
+
+    # Locate the first H1 (document title); the TOC search starts right after it.
+    title_idx = None
+    for i in range(min(total, search_limit)):
+        if re.match(r'^#\s+', lines[i].strip()):
+            title_idx = i
+            break
+
+    scan_start = (title_idx + 1) if title_idx is not None else 0
+
+    toc_start_idx = None
+    toc_end_idx = None
+
+    i = scan_start
+    while i < search_limit:
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+
+        heading_line_idx = None
+        if any(re.match(p, stripped) for p in heading_patterns):
+            heading_line_idx = i
+            j = i + 1
+            while j < search_limit and not lines[j].strip():
+                j += 1
+            run_start = j
+        elif is_anchor_list_item(stripped):
+            run_start = i
+        else:
+            # First non-blank content after the title is neither a TOC heading nor a
+            # TOC-like list item, so there is no hand-written TOC to strip.
+            break
+
+        # Collect the contiguous run of list items starting at run_start (a real blank
+        # line ends the run - TOC entries are not blank-line separated).
+        collected = []
+        j = run_start
+        while j < search_limit and is_list_item(lines[j].strip()):
+            collected.append(j)
+            j += 1
+
+        if collected:
+            anchor_count = sum(1 for k in collected if is_anchor_list_item(lines[k].strip()))
+            if anchor_count / len(collected) >= 0.8:
+                toc_start_idx = heading_line_idx if heading_line_idx is not None else collected[0]
+                toc_end_idx = collected[-1]
+        break
+
+    if toc_start_idx is None or toc_end_idx is None:
+        return md_text
+
+    result_lines = lines[:toc_start_idx] + lines[toc_end_idx + 1:]
+    return '\n'.join(result_lines)
+
+
 def convert_to_html(md_text):
     """Converts Markdown text to HTML string using the 'markdown' library.
 
@@ -311,8 +423,15 @@ def build_toc_entry_paragraph(doc, level, text, bookmark_name):
     return p
 
 
-def build_toc(doc, toc_entries):
-    """Builds the Table of Contents (TOC) block for Word documents."""
+def build_toc(doc, toc_entries, insert_after=None):
+    """Builds the Table of Contents (TOC) block for Word documents.
+
+    Args:
+        insert_after: xml element (e.g. a heading paragraph's ._p) the TOC block
+            should be placed right after - typically the document title, so the
+            title reads before the TOC instead of being pushed after it. Falls
+            back to inserting at the very start of the document when None.
+    """
     if not toc_entries:
         return
 
@@ -374,7 +493,11 @@ def build_toc(doc, toc_entries):
         sdt_content.append(p._p)
     sdt.append(sdt_content)
 
-    doc.element.body.insert(0, sdt)
+    body = doc.element.body
+    if insert_after is not None and insert_after in list(body):
+        body.insert(list(body).index(insert_after) + 1, sdt)
+    else:
+        body.insert(0, sdt)
 
 
 def create_word_from_md(md_text, output_path):
@@ -422,6 +545,7 @@ def create_word_from_md(md_text, output_path):
         h_counters = [0, 0, 0]
         toc_entries = []
         bookmark_counter = 0
+        title_element = None  # xml element of the first H1 (document title)
         
         lines = md_text.split('\n')
         num_lines = len(lines)
@@ -506,7 +630,16 @@ def create_word_from_md(md_text, output_path):
                 # Remove any [text](url) links from the heading, keeping only the text
                 title_clean = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', title_text)
                 
-                if level in (1, 2, 3):
+                if level == 1 and title_element is None:
+                    # The very first H1 is the document title, not a numbered
+                    # chapter: render it with the big built-in "Title" style,
+                    # leave it out of the chapter numbering / TOC entries, and
+                    # give it space-after instead of blank paragraphs so it
+                    # doesn't sit glued to the TOC box that follows.
+                    heading = doc.add_heading(title_clean, level=0)
+                    heading.paragraph_format.space_after = Pt(0)
+                    title_element = heading._p
+                elif level in (1, 2, 3):
                     if level == 1:
                         h_counters[0] += 1
                         h_counters[1] = 0
@@ -598,7 +731,7 @@ def create_word_from_md(md_text, output_path):
 
             i += 1
 
-        build_toc(doc, toc_entries)
+        build_toc(doc, toc_entries, insert_after=title_element)
 
         doc.save(output_path)
         print(f"OK: {output_path.name}")
@@ -649,6 +782,10 @@ stem = Path(output_name) if output_name else src.with_suffix('')
 print("\nReading Markdown file...")
 md_text = open(src, encoding='utf-8').read()
 md_text = strip_frontmatter(md_text)
+# Rimuovi l'eventuale TOC scritta a mano nel markdown sorgente: HTML, PDF e DOCX
+# generano tutti la propria TOC automatica piu' avanti, quindi quella originale
+# sarebbe solo duplicata.
+md_text = strip_md_toc(md_text)
 print(f"Read: {len(md_text)} characters.")
 
 # ── Convert Markdown to HTML (required for HTML/PDF output) ──
@@ -677,9 +814,13 @@ h1, h2, h3, h4, h5, h6 {
     page-break-after: avoid;
 }
 
-/* First H1 - add TOC right after it */
-h1:first-of-type { 
-    margin-bottom: 8px; 
+/* Document title (the first H1, pulled out in front of the TOC) */
+.doc-title {
+    font-size: 26pt;
+    font-weight: 700;
+    color: #1e3c72;
+    margin: 0 0 28px 0;
+    letter-spacing: .3px;
 }
 
 /* Table of Contents container */
@@ -841,6 +982,10 @@ if body_html is not None:
     used_ids = {}
     toc_entries = []  # (level, numbered_text, anchor_id)
 
+    # Holds the rendered title <h1> block once found, so it can be placed
+    # before the TOC instead of staying wherever it naturally falls in the body.
+    title_html_box = []
+
     def add_heading_id(match_obj):
         level = int(match_obj.group(1))
         inner_html = match_obj.group(2)
@@ -848,6 +993,21 @@ if body_html is not None:
         text_plain = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', inner_html)
         text_plain = re.sub(r'<[^>]+>', '', text_plain)
         text_plain = ' '.join(text_plain.split())
+
+        # The very first H1 is the document title, not a numbered chapter:
+        # give it a distinct anchor/class, keep it out of the chapter
+        # numbering and out of the TOC entries, and render it separately
+        # before the TOC (mirrors the Word "Title" style treatment).
+        if level == 1 and not title_html_box:
+            base_id = slugify(text_plain)
+            seen = used_ids.get(base_id, 0)
+            used_ids[base_id] = seen + 1
+            anchor_id = base_id if seen == 0 else f"{base_id}-{seen}"
+            title_html_box.append(
+                f'<a name="{anchor_id}">&nbsp;</a>'
+                f'<h1 id="{anchor_id}" class="doc-title">{inner_html}</h1>'
+            )
+            return ''
 
         display_html = inner_html
         if level in (1, 2, 3):
@@ -892,6 +1052,8 @@ if body_html is not None:
         flags=re.S,
     )
 
+    title_html = title_html_box[0] if title_html_box else ''
+
     level_class = {1: 'toc-l1', 2: 'toc-l2', 3: 'toc-l3'}
     toc_links_html = '\n'.join(
         f'<li class="{level_class[level]}"><a href="#{anchor_id}">{text}</a></li>'
@@ -903,6 +1065,8 @@ if body_html is not None:
 <head><meta charset="UTF-8"><title>Converted Document</title>
 <style>{CSS}</style></head>
 <body>
+
+{title_html}
 
 <div id="toc">
 <h4>Table of Contents</h4>
@@ -937,10 +1101,12 @@ if choice in ['P', 'A']:
         pdf_path = stem.with_suffix('.pdf')
         html_to_pdf(html_doc, pdf_path)
 
+# Word conversion uses processed text (TOC stripped for markdown source TOC)
 if choice in ['W', 'A']:
     if DOCX_AVAILABLE:
         word_path = stem.with_suffix('.docx')
         create_word_from_md(md_text, word_path)
+        print(f"Generated: {word_path}")
     else:
         _missing('python-docx')
         print("Skipping DOCX generation.")
