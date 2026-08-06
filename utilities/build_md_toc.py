@@ -33,14 +33,16 @@ from pathlib import Path
 # ── Helper comments section ──
 
 
-def _missing(pip_name):
+def _missing(pip_name: str) -> None:
     """
     [Helper Function] Outputs an actionable warning message if a required third-party library 
-    is not available in the current Python environment.
+    is missing from the current Python environment. This function is critical for robust
+    runtime checks, preventing unexpected crashes due to missing dependencies.
 
     Parameters:
-        pip_name (str): The name of the missing library package.
+        pip_name (str): The name of the missing library package (e.g., 'markdown').
     """
+    # Use a simple f-string print statement for immediate feedback to the user/developer running the script.
     print(f"Library '{pip_name}' not found. Install with: pip install {pip_name}")
 
 
@@ -72,21 +74,23 @@ except ImportError:
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 
-def strip_frontmatter(md_text):
+def strip_frontmatter(md_text: str) -> str:
     """
     [Utility Function] Strips common YAML "Front Matter" blocks from the start of a Markdown file.
 
-    Front matter is used in many static site generators (e.g., Jekyll, Hugo) to store 
-    metadata like author, date, or version before the main content begins. It must be removed 
-    before parsing the core markdown text.
+    The front matter is metadata (like author, date, or version) used by static site generators 
+    (e.g., Jekyll, Hugo). Since this data is *outside* the primary narrative content, it must be removed 
+    before parsing to prevent the parser from interpreting meta-data keys as regular text/headings.
 
     Parameters:
-        md_text (str): The raw Markdown content string read from disk.
+        md_text (str): The raw Markdown content string read from disk. This is expected to contain
+            the '---' delimiters defining the front matter block.
 
     Returns:
-        str: The cleaned Markdown text with the front matter block completely removed.
+        str: The cleaned Markdown text with the front matter block completely removed, maintaining 
+             the original line endings and structure of the core document content.
     """
-    lines = md_text.split('\n')
+    lines = md_text.split('\n') # Splits the string into a list of lines for iterative checking.
     # Check if the first line is the start delimiter '---'.
     if lines and lines[0].strip() == '---':
         for idx in range(1, len(lines)):
@@ -269,26 +273,31 @@ def _cell_text_len(cell_html):
     return len(re.sub(r'<[^>]+>', '', cell_html).strip())
 
 
-def _longest_word_len(cell_html):
+def _longest_word_len(cell_html: str) -> int:
     """
-    [Utility] Calculates the length of the longest continuous, unbreakable word within a table cell.
+    [Utility] Calculates the length of the longest continuous, unbreakable word within a table cell's content.
 
-    Critical Limitation Workaround: The xhtml2pdf/ReportLab PDF engine only wraps text at 
-    whitespace boundaries. Therefore, we must ensure that the minimum calculated column width 
-    is greater than or equal to the widest single word in that column, preventing crashes 
-    when the content is highly varied (e.g., a long URL vs. "A").
+    This calculation is crucial because PDF rendering engines like xhtml2pdf/ReportLab only wrap text 
+    at whitespace boundaries. To prevent runtime crashes when calculating column widths (due to 
+    negative available width), we must ensure that the minimum calculated column width accommodates 
+    the single longest word in any given cell, regardless of surrounding content.
 
     Parameters:
-        cell_html (str): The raw HTML string of the table cell.
+        cell_html (str): The raw HTML string content of the table cell.
 
     Returns:
         int: Length of the longest single word found in the cell's text content. Returns 0 if empty.
     """
-    # Step 1: Strip all HTML tags to get pure text for analysis.
+    # Step 1: Strip all HTML tags to get pure, clean text for analysis using regex substitution.
     text = re.sub(r'<[^>]+>', '', cell_html).strip()
-    # Step 2: Use regex splitting by one or more whitespace characters (\s+) to reliably extract word boundaries.
+    
+    # Step 2: Use regex splitting (re.split) by one or more whitespace characters (\s+)
+    # This reliably extracts all word tokens from the continuous text string, handling multiple spaces robustly.
     words = re.split(r'\s+', text)
-    # Step 3: Calculate and return the maximum length found among all words.
+    
+    # Step 3: Calculate and return the maximum length found among all extracted words using a generator expression.
+    # Example of advanced Python features: The `max()` function combined with a generator `(len(w) for w in words)`
+    # is efficient as it calculates lengths only when needed, avoiding unnecessary list creation.
     return max((len(w) for w in words), default=0)
 
 
