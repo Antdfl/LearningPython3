@@ -60,7 +60,7 @@ except ImportError:
 
 try:
     from docx import Document
-    from docx.shared import Pt, Inches
+    from docx.shared import Pt, Inches, RGBColor
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
     DOCX_AVAILABLE = True
@@ -95,6 +95,34 @@ def strip_frontmatter(md_text):
                 return '\n'.join(lines[idx + 1:]).lstrip('\n')
     # If no front matter structure was found, return the original text unchanged.
     return md_text
+
+
+def extract_frontmatter_fields(md_text):
+    """
+    [Utility Function] Reads simple flat 'key: value' pairs out of a leading
+    YAML front matter block - just enough to recover metadata like 'title'
+    and 'subtitle' for display, not a general-purpose YAML parser.
+
+    Parameters:
+        md_text (str): The raw Markdown content string, front matter still
+            attached (call this before strip_frontmatter removes it).
+
+    Returns:
+        dict: Front matter keys mapped to their unquoted string values.
+        Empty dict if the document has no front matter block.
+    """
+    fields = {}
+    lines = md_text.split('\n')
+    if not lines or lines[0].strip() != '---':
+        return fields
+    for line in lines[1:]:
+        if line.strip() == '---':
+            break
+        match = re.match(r'^(\w[\w-]*)\s*:\s*(.+)$', line.strip())
+        if match:
+            key, value = match.group(1), match.group(2).strip()
+            fields[key] = value.strip('"').strip("'")
+    return fields
 
 
 def strip_md_toc(md_text):
@@ -480,14 +508,19 @@ def build_toc(doc, has_headings, insert_after=None):
         body.insert(0, sdt)
 
 
-def create_word_from_md(md_text, output_path):
+def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None):
     """
     Creates a Microsoft Word document (.docx) from Markdown source with automatic
     Table of Contents (TOC) generation. Supports all standard Markdown syntax
     including headings, lists, tables, images, links, and code blocks.
 
     TOC Features:
-    - Automatically numbered headings (1, 1.1, 1.1.1 format)
+    - Automatically numbered headings (1, 1.1, 1.1.1 format): H1 is the
+      chapter counter (1, 2, 3...), H2 nests under its enclosing H1 (1.1,
+      1.2...), and H3 nests under its enclosing H2 (1.1.1, 1.1.2...). The
+      markdown content itself has no separate, un-numbered "document title"
+      heading - that comes only from doc_title/doc_subtitle (front matter),
+      if given.
     - Clickable TOC with hyperlinks to each section
     - Hierarchical indentation matching heading levels
 
@@ -504,6 +537,10 @@ def create_word_from_md(md_text, output_path):
     Args:
         md_text (str): The full Markdown content as a string
         output_path (Path): Path where the .docx file will be saved
+        doc_title (str): Optional document title (from front matter),
+            rendered with the big built-in "Title" style before the TOC.
+        doc_subtitle (str): Optional subtitle (from front matter), rendered
+            right under doc_title. Ignored if doc_title is not given.
     """
     def split_table_row(row_line):
         # Helper: splits a markdown table row by '|' into individual cell content
@@ -521,11 +558,24 @@ def create_word_from_md(md_text, output_path):
 
     try:
         doc = Document()
-        
+
         h_counters = [0, 0, 0]
         has_headings = False
-        title_element = None  # xml element of the first H1 (document title)
-        
+        title_element = None  # xml element the TOC is inserted right after
+
+        if doc_title:
+            heading = doc.add_heading(doc_title, level=0)
+            heading.paragraph_format.space_after = Pt(4 if doc_subtitle else 0)
+            title_element = heading._p
+            if doc_subtitle:
+                subtitle_p = doc.add_paragraph()
+                subtitle_run = subtitle_p.add_run(doc_subtitle)
+                subtitle_run.font.size = Pt(14)
+                subtitle_run.font.italic = True
+                subtitle_run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+                subtitle_p.paragraph_format.space_after = Pt(0)
+                title_element = subtitle_p._p
+
         lines = md_text.split('\n')
         num_lines = len(lines)
         i = 0
@@ -537,6 +587,23 @@ def create_word_from_md(md_text, output_path):
             if not line:
                 # Skip empty lines (no paragraph needed)
                 i += 1
+                continue
+
+            # ── Fenced Code Blocks (```...``` or ~~~...~~~) ──
+            # Render the block's lines verbatim as monospace paragraphs and
+            # skip normal markdown parsing inside it - otherwise a Python/SQL
+            # comment like "# nota" sitting inside the fence would be
+            # mistaken for a real heading.
+            fence_match = re.match(r'^(```|~~~)', line)
+            if fence_match:
+                fence = fence_match.group(1)
+                j = i + 1
+                while j < num_lines and not lines[j].strip().startswith(fence):
+                    p = doc.add_paragraph(lines[j])
+                    for run in p.runs:
+                        run.font.name = 'Consolas'
+                    j += 1
+                i = j + 1  # skip past the closing fence line
                 continue
 
             # ── Markdown Tables Detection ──
@@ -609,32 +676,37 @@ def create_word_from_md(md_text, output_path):
                 # Remove any [text](url) links from the heading, keeping only the text
                 title_clean = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', title_text)
                 
-                if level == 1 and title_element is None:
-                    # The very first H1 is the document title, not a numbered
-                    # chapter: render it with the big built-in "Title" style,
-                    # leave it out of the chapter numbering / TOC entries, and
-                    # give it space-after instead of blank paragraphs so it
-                    # doesn't sit glued to the TOC box that follows.
-                    heading = doc.add_heading(title_clean, level=0)
-                    heading.paragraph_format.space_after = Pt(0)
-                    title_element = heading._p
-                elif level in (1, 2, 3):
+                if level in (1, 2, 3):
+                    # H1 is the chapter counter (1, 2, 3...); H2 nests under
+                    # its enclosing H1 (1.1, 1.2...); H3 nests under its
+                    # enclosing H2 (1.1.1, 1.1.2...). If a document jumps
+                    # straight to H2/H3 without a preceding H1, the missing
+                    # ancestor levels are treated as chapter/section 1 so the
+                    # numbering never shows a leading "0".
                     if level == 1:
                         h_counters[0] += 1
                         h_counters[1] = 0
                         h_counters[2] = 0
                         numbering = f"{h_counters[0]}"
                     elif level == 2:
+                        if h_counters[0] == 0:
+                            h_counters[0] = 1
                         h_counters[1] += 1
                         h_counters[2] = 0
                         numbering = f"{h_counters[0]}.{h_counters[1]}"
                     else:
+                        if h_counters[0] == 0:
+                            h_counters[0] = 1
+                        if h_counters[1] == 0:
+                            h_counters[1] = 1
                         h_counters[2] += 1
                         numbering = f"{h_counters[0]}.{h_counters[1]}.{h_counters[2]}"
 
                     numbered_text = f"{numbering} {title_clean}"
-                    doc.add_heading(numbered_text, level=level)
+                    heading = doc.add_heading(numbered_text, level=level)
                     has_headings = True
+                    if title_element is None:
+                        title_element = heading._p
                 elif level == 4:
                     # Level 4 headings are too deep for TOC, render as custom paragraph
                     p = doc.add_paragraph()
@@ -756,6 +828,13 @@ stem = Path(output_name) if output_name else src.with_suffix('')
 # ── Read the Markdown content ──
 print("\nReading Markdown file...")
 md_text = open(src, encoding='utf-8').read()
+# The document title/subtitle shown above the TOC comes from the front
+# matter (if any), not from the first '#' heading, which is now numbered
+# and indexed like any other chapter - so the metadata must be read before
+# strip_frontmatter discards the block.
+frontmatter_fields = extract_frontmatter_fields(md_text)
+doc_title = frontmatter_fields.get('title')
+doc_subtitle = frontmatter_fields.get('subtitle')
 md_text = strip_frontmatter(md_text)
 # Rimuovi l'eventuale TOC scritta a mano nel markdown sorgente: HTML, PDF e DOCX
 # generano tutti la propria TOC automatica piu' avanti, quindi quella originale
@@ -784,18 +863,24 @@ body {
     margin: 0; 
 }
 
-h1, h2, h3, h4, h5, h6 { 
-    margin-top: 0; 
+h1, h2, h3, h4, h5, h6 {
+    margin-top: 0;
     page-break-after: avoid;
 }
 
-/* Document title (the first H1, pulled out in front of the TOC) */
+/* Document title/subtitle (from front matter, shown above the TOC) */
 .doc-title {
     font-size: 26pt;
     font-weight: 700;
     color: #1e3c72;
-    margin: 0 0 28px 0;
+    margin: 0 0 4px 0;
     letter-spacing: .3px;
+}
+.doc-subtitle {
+    font-size: 13pt;
+    color: #555;
+    font-style: italic;
+    margin: 0 0 24px 0;
 }
 
 /* Table of Contents container */
@@ -933,6 +1018,24 @@ a { color: #1e3c72; text-decoration: underline; }
 img { max-width: 100%; height: auto; }
 """
 
+def confirm_overwrite(path):
+    """Asks the user for confirmation before overwriting an existing file.
+
+    Default is 'N' (do not overwrite) if the user just presses Enter.
+
+    Returns:
+        bool: True if generation should proceed (file doesn't exist, or user
+        confirmed with 'S'), False if the user declined.
+    """
+    if not path.exists():
+        return True
+    answer = input(f"Il file {path.name} esiste già. Vuoi sovrascriverlo?(S/N) ").strip().upper()
+    if answer == 'S':
+        return True
+    print("Ok, allora non devo fare nulla.")
+    return False
+
+
 def slugify(text):
     """Convert heading text to a safe, unique anchor ID.
 
@@ -957,10 +1060,6 @@ if body_html is not None:
     used_ids = {}
     toc_entries = []  # (level, numbered_text, anchor_id)
 
-    # Holds the rendered title <h1> block once found, so it can be placed
-    # before the TOC instead of staying wherever it naturally falls in the body.
-    title_html_box = []
-
     def add_heading_id(match_obj):
         level = int(match_obj.group(1))
         inner_html = match_obj.group(2)
@@ -969,33 +1068,29 @@ if body_html is not None:
         text_plain = re.sub(r'<[^>]+>', '', text_plain)
         text_plain = ' '.join(text_plain.split())
 
-        # The very first H1 is the document title, not a numbered chapter:
-        # give it a distinct anchor/class, keep it out of the chapter
-        # numbering and out of the TOC entries, and render it separately
-        # before the TOC (mirrors the Word "Title" style treatment).
-        if level == 1 and not title_html_box:
-            base_id = slugify(text_plain)
-            seen = used_ids.get(base_id, 0)
-            used_ids[base_id] = seen + 1
-            anchor_id = base_id if seen == 0 else f"{base_id}-{seen}"
-            title_html_box.append(
-                f'<a name="{anchor_id}">&nbsp;</a>'
-                f'<h1 id="{anchor_id}" class="doc-title">{inner_html}</h1>'
-            )
-            return ''
-
         display_html = inner_html
         if level in (1, 2, 3):
+            # H1 is the chapter counter (1, 2, 3...); H2 nests under its
+            # enclosing H1 (1.1, 1.2...); H3 nests under its enclosing H2
+            # (1.1.1, 1.1.2...). Missing ancestor levels (e.g. a document
+            # jumping straight to H2/H3) are treated as chapter/section 1
+            # so numbering never shows a leading "0".
             if level == 1:
                 h_counters[0] += 1
                 h_counters[1] = 0
                 h_counters[2] = 0
                 numbering = f"{h_counters[0]}"
             elif level == 2:
+                if h_counters[0] == 0:
+                    h_counters[0] = 1
                 h_counters[1] += 1
                 h_counters[2] = 0
                 numbering = f"{h_counters[0]}.{h_counters[1]}"
             else:
+                if h_counters[0] == 0:
+                    h_counters[0] = 1
+                if h_counters[1] == 0:
+                    h_counters[1] = 1
                 h_counters[2] += 1
                 numbering = f"{h_counters[0]}.{h_counters[1]}.{h_counters[2]}"
             display_html = f"{numbering} {inner_html}"
@@ -1027,13 +1122,16 @@ if body_html is not None:
         flags=re.S,
     )
 
-    title_html = title_html_box[0] if title_html_box else ''
-
     level_class = {1: 'toc-l1', 2: 'toc-l2', 3: 'toc-l3'}
     toc_links_html = '\n'.join(
         f'<li class="{level_class[level]}"><a href="#{anchor_id}">{text}</a></li>'
         for level, text, anchor_id in toc_entries
     )
+
+    title_box_html = ''
+    if doc_title:
+        subtitle_html = f'<div class="doc-subtitle">{doc_subtitle}</div>' if doc_subtitle else ''
+        title_box_html = f'<h1 class="doc-title">{doc_title}</h1>{subtitle_html}'
 
     html_doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -1041,7 +1139,7 @@ if body_html is not None:
 <style>{CSS}</style></head>
 <body>
 
-{title_html}
+{title_box_html}
 
 <div id="toc">
 <h4>Table of Contents</h4>
@@ -1059,8 +1157,9 @@ if body_html is not None:
 if choice in ['H', 'A']:
     if html_doc is not None:
         html_path = stem.with_suffix('.html')
-        html_path.write_text(html_doc, encoding='utf-8')
-        print(f"Generated: {html_path}")
+        if confirm_overwrite(html_path):
+            html_path.write_text(html_doc, encoding='utf-8')
+            print(f"Generated: {html_path}")
     else:
         _missing('markdown')
         print("Skipping HTML generation.")
@@ -1074,14 +1173,16 @@ if choice in ['P', 'A']:
         print("Skipping PDF generation.")
     else:
         pdf_path = stem.with_suffix('.pdf')
-        html_to_pdf(html_doc, pdf_path)
+        if confirm_overwrite(pdf_path):
+            html_to_pdf(html_doc, pdf_path)
 
 # Word conversion uses processed text (TOC stripped for markdown source TOC)
 if choice in ['W', 'A']:
     if DOCX_AVAILABLE:
         word_path = stem.with_suffix('.docx')
-        create_word_from_md(md_text, word_path)
-        print(f"Generated: {word_path}")
+        if confirm_overwrite(word_path):
+            create_word_from_md(md_text, word_path, doc_title=doc_title, doc_subtitle=doc_subtitle)
+            print(f"Generated: {word_path}")
     else:
         _missing('python-docx')
         print("Skipping DOCX generation.")
