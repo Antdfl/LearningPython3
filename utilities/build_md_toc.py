@@ -43,7 +43,7 @@ def _missing(pip_name: str) -> None:
         pip_name (str): The name of the missing library package (e.g., 'markdown').
     """
     # Use a simple f-string print statement for immediate feedback to the user/developer running the script.
-    print(f"Library '{pip_name}' not found. Install with: pip install {pip_name}")
+    print(f"Libreria '{pip_name}' non trovata. Installala con: pip install {pip_name}")
 
 
 try:
@@ -409,16 +409,21 @@ def shrink_wide_tables(html_content, max_cols_before_shrink=6):
 
 
 def html_to_pdf(html_content, output_path):
-    """Converts an HTML string to a PDF file using the 'xhtml2pdf' library."""
+    """Converts an HTML string to a PDF file using the 'xhtml2pdf' library.
+
+    Returns:
+        bool: True if the PDF was generated successfully, False otherwise.
+    """
     try:
         with open(output_path, 'wb') as pdf_file:
             result = pisa.CreatePDF(html_content, dest=pdf_file, encoding='utf-8')
         if result.err:
-            print(f"PDF generation error (xhtml2pdf reported {result.err} problems)")
-        else:
-            print(f"OK: {output_path.name}")
+            print(f"Errore nella generazione del PDF (xhtml2pdf ha segnalato {result.err} problemi)")
+            return False
+        return True
     except PermissionError as e:
-        print(f"Cannot write to {output_path.name}: {e}")
+        print(f"Impossibile scrivere su {output_path.name}: {e}")
+        return False
 
 
 def build_toc(doc, has_headings, insert_after=None):
@@ -790,33 +795,31 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
         build_toc(doc, has_headings, insert_after=title_element)
 
         doc.save(output_path)
-        print(f"OK: {output_path.name}")
+        return True
     except Exception as e:
-        print(f"Error creating DOCX file: {e}")
+        print(f"Errore nella creazione del file DOCX: {e}")
+        return False
 
 
-# ── Interactive menu to choose output formats ──
+# ── Menu interattivo per la scelta del formato di output ──
 print("\n" + "=" * 40)
-print("=== Convert Markdown File (with TOC for HTML/PDF) ===")
+print("=== Conversione file Markdown (con TOC per HTML/PDF) ===")
 print("=" * 40)
-print("H = HTML only (.html)")
-print("P = PDF only (.pdf)  <-- DEFAULT")
-print("W = Word only (.docx)")
-print("A = All three formats (HTML, PDF, DOCX)")
-print("=" * 40)
-print("NEW: Both HTML and PDF will have a clickable TOC right after the first H1 heading.")
-print("The Word format already has TOC support built-in.")
+print("H = Solo HTML (.html)")
+print("P = Solo PDF (.pdf)  <-- DEFAULT")
+print("W = Solo Word (.docx)")
+print("A = Tutti e tre i formati (HTML, PDF, DOCX)")
 print("=" * 40)
 
-choice = input("\nChoose format: H | P | W | A? ").strip().upper()
+choice = input("\nScegli il formato: H | P | W | A? ").strip().upper()
 
-# Fallback: if the user didn't select anything, default to PDF
+# Fallback: se l'utente non seleziona nulla, viene usato il default PDF
 if not choice or choice == "":
-    print("No selection - using default: PDF (.pdf)")
+    print("Nessuna selezione - uso il default: PDF (.pdf)")
     choice = "P"
 
 if choice not in ['H', 'P', 'W', 'A']:
-    print("Invalid selection. Exiting program.")
+    print("Selezione non valida. Uscita dal programma.")
     sys.exit(1)
 
 # ── Input file ──
@@ -826,17 +829,54 @@ if not src.is_absolute():
     src = SCRIPT_DIR / src
 
 if not src.exists():
-    print(f"File not found: {src}")
+    print(f"File non trovato: {src}")
     sys.exit(1)
 
-# ── Output filename ──
+# ── Nome del file di output ──
 default_stem = src.with_suffix('').name
-output_name = input(f"\nOutput filename base [{default_stem}]: ").strip()
+output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip()
 stem = Path(output_name) if output_name else src.with_suffix('')
 
-# ── Read the Markdown content ──
-print("\nReading Markdown file...")
-md_text = open(src, encoding='utf-8').read()
+# ── Determinazione file di output e richiesta consenso ──
+target_files = []
+output_dir = SCRIPT_DIR # Tutti gli output vanno nella stessa directory dello script
+
+if choice in ['H', 'A']:
+    target_files.append(Path(f"{output_dir}/{stem.name}.html"))
+if choice in ['P', 'A']:
+    target_files.append(Path(f"{output_dir}/{stem.name}.pdf"))
+if choice in ['W', 'A']:
+    target_files.append(Path(f"{output_dir}/{stem.name}.docx"))
+
+print("\n" + "=" * 40)
+print("=== ATTENZIONE: FILE DI OUTPUT === ")
+if target_files:
+    print("I file seguenti verranno creati o sovrascritti:")
+    for i, f in enumerate(target_files):
+        print(f"{i+1}. {f.name}")
+    
+    confirmation = input("\nVuoi procedere con la creazione/sovrascrittura dei file mostrati?(S/N) [Default N]: ").strip().upper()
+
+    if confirmation == 'S':
+        # Consenso ricevuto, continua l'esecuzione
+        pass 
+    else:
+        print("\nOk allora non devo fare nulla. Uscita dal programma.")
+        sys.exit(0) # Termina lo script senza salvare file
+
+else:
+    # Caso in cui nessun output è selezionato (non dovrebbe accadere con i controlli precedenti, ma è una safety measure)
+    print("\nNessun formato di output selezionato. Uscita dal programma.")
+    sys.exit(0)
+
+
+# ── Lettura del contenuto Markdown ──
+print("\nLettura del file Markdown in corso...")
+try:
+    md_text = open(src, encoding='utf-8-sig').read()
+except UnicodeDecodeError:
+    print("Attenzione: il file non e' UTF-8, provo con la codifica Windows-1252 (cp1252)...")
+    md_text = open(src, encoding='cp1252').read()
 # The document title/subtitle shown above the TOC comes from the front
 # matter (if any), not from the first '#' heading, which is now numbered
 # and indexed like any other chapter - so the metadata must be read before
@@ -849,7 +889,7 @@ md_text = strip_frontmatter(md_text)
 # generano tutti la propria TOC automatica piu' avanti, quindi quella originale
 # sarebbe solo duplicata.
 md_text = strip_md_toc(md_text)
-print(f"Read: {len(md_text)} characters.")
+print(f"Letti: {len(md_text)} caratteri.")
 
 # ── Convert Markdown to HTML (required for HTML/PDF output) ──
 needs_html = choice in ['H', 'P', 'A']
@@ -1027,24 +1067,6 @@ a { color: #1e3c72; text-decoration: underline; }
 img { max-width: 100%; height: auto; }
 """
 
-def confirm_overwrite(path):
-    """Asks the user for confirmation before overwriting an existing file.
-
-    Default is 'N' (do not overwrite) if the user just presses Enter.
-
-    Returns:
-        bool: True if generation should proceed (file doesn't exist, or user
-        confirmed with 'S'), False if the user declined.
-    """
-    if not path.exists():
-        return True
-    answer = input(f"Il file {path.name} esiste già. Vuoi sovrascriverlo?(S/N) ").strip().upper()
-    if answer == 'S':
-        return True
-    print("Ok, allora non devo fare nulla.")
-    return False
-
-
 def slugify(text):
     """Convert heading text to a safe, unique anchor ID.
 
@@ -1162,40 +1184,38 @@ if body_html is not None:
 {html_with_ids}</body>
 </html>"""
 
-# ── Generate files based on user choice ──
+# ── Generazione dei file in base alla scelta dell'utente ──
 if choice in ['H', 'A']:
     if html_doc is not None:
         html_path = stem.with_suffix('.html')
-        if confirm_overwrite(html_path):
-            html_path.write_text(html_doc, encoding='utf-8')
-            print(f"Generated: {html_path}")
+        html_path.write_text(html_doc, encoding='utf-8')
+        print(f"Generato: {html_path}")
     else:
         _missing('markdown')
-        print("Skipping HTML generation.")
+        print("Generazione HTML saltata.")
 
 if choice in ['P', 'A']:
     if html_doc is None:
         _missing('markdown')
-        print("Skipping PDF generation.")
+        print("Generazione PDF saltata.")
     elif not XHTML2PDF_AVAILABLE:
         _missing('xhtml2pdf')
-        print("Skipping PDF generation.")
+        print("Generazione PDF saltata.")
     else:
         pdf_path = stem.with_suffix('.pdf')
-        if confirm_overwrite(pdf_path):
-            html_to_pdf(html_doc, pdf_path)
+        if html_to_pdf(html_doc, pdf_path):
+            print(f"Generato: {pdf_path}")
 
-# Word conversion uses processed text (TOC stripped for markdown source TOC)
+# La conversione Word usa il testo gia' processato (TOC rimossa dal markdown sorgente)
 if choice in ['W', 'A']:
     if DOCX_AVAILABLE:
         word_path = stem.with_suffix('.docx')
-        if confirm_overwrite(word_path):
-            create_word_from_md(md_text, word_path, doc_title=doc_title, doc_subtitle=doc_subtitle)
-            print(f"Generated: {word_path}")
+        if create_word_from_md(md_text, word_path, doc_title=doc_title, doc_subtitle=doc_subtitle):
+            print(f"Generato: {word_path}")
     else:
         _missing('python-docx')
-        print("Skipping DOCX generation.")
+        print("Generazione DOCX saltata.")
 
 print("\n" + "=" * 40)
-print("Conversion complete!")
+print("Conversione completata!")
 print("=" * 40)
