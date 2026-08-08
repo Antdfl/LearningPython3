@@ -838,36 +838,44 @@ output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip(
 stem = Path(output_name) if output_name else src.with_suffix('')
 
 # ── Determinazione file di output e richiesta consenso ──
+# Questi percorsi devono corrispondere esattamente a quelli usati piu' sotto
+# per salvare i file (stem.with_suffix(...)), altrimenti il controllo di
+# esistenza guarda nella cartella sbagliata e non rileva i file da sovrascrivere.
 target_files = []
-output_dir = SCRIPT_DIR # Tutti gli output vanno nella stessa directory dello script
 
 if choice in ['H', 'A']:
-    target_files.append(Path(f"{output_dir}/{stem.name}.html"))
+    target_files.append(stem.with_suffix('.html'))
 if choice in ['P', 'A']:
-    target_files.append(Path(f"{output_dir}/{stem.name}.pdf"))
+    target_files.append(stem.with_suffix('.pdf'))
 if choice in ['W', 'A']:
-    target_files.append(Path(f"{output_dir}/{stem.name}.docx"))
+    target_files.append(stem.with_suffix('.docx'))
 
-print("\n" + "=" * 40)
-print("=== ATTENZIONE: FILE DI OUTPUT === ")
-if target_files:
-    print("I file seguenti verranno creati o sovrascritti:")
-    for i, f in enumerate(target_files):
-        print(f"{i+1}. {f.name}")
-    
-    confirmation = input("\nVuoi procedere con la creazione/sovrascrittura dei file mostrati?(S/N) [Default N]: ").strip().upper()
-
-    if confirmation == 'S':
-        # Consenso ricevuto, continua l'esecuzione
-        pass 
-    else:
-        print("\nOk allora non devo fare nulla. Uscita dal programma.")
-        sys.exit(0) # Termina lo script senza salvare file
-
-else:
+if not target_files:
     # Caso in cui nessun output è selezionato (non dovrebbe accadere con i controlli precedenti, ma è una safety measure)
     print("\nNessun formato di output selezionato. Uscita dal programma.")
     sys.exit(0)
+
+# La conferma di sovrascrittura va chiesta solo per i file che esistono
+# gia' con quel nome - se nessuno dei file target esiste, si procede
+# direttamente senza interrompere il flusso con una domanda inutile.
+existing_files = [f for f in target_files if f.exists()]
+
+if existing_files:
+    print("\n" + "=" * 40)
+    print("=== ATTENZIONE: FILE DI OUTPUT GIA' ESISTENTI === ")
+    print("I file seguenti esistono gia' e verranno sovrascritti:")
+    for i, f in enumerate(existing_files):
+        print(f"{i+1}. {f.name}")
+    print("=" * 40)
+
+    confirmation = input("\nVuoi procedere con la sovrascrittura dei file mostrati?(S/N) [Default N]: ").strip().upper()
+
+    if confirmation == 'S':
+        # Consenso ricevuto, continua l'esecuzione
+        pass
+    else:
+        print("\nOk allora non devo fare nulla. Uscita dal programma.")
+        sys.exit(0) # Termina lo script senza salvare file
 
 
 # ── Lettura del contenuto Markdown ──
