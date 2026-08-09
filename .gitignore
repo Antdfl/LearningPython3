@@ -11,7 +11,5 @@ chrome_profile/
 .DS_Store
 .clinerules
 utilities/tesseract/
-utilities/lessons_learned.md
-utilities/docs_prompt_template.md
 *.ps1
 *.bat
