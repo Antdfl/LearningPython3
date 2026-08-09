@@ -801,111 +801,6 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
         return False
 
 
-# ── Menu interattivo per la scelta del formato di output ──
-print("\n" + "=" * 40)
-print("=== Conversione file Markdown (con TOC per HTML/PDF) ===")
-print("=" * 40)
-print("H = Solo HTML (.html)")
-print("P = Solo PDF (.pdf)  <-- DEFAULT")
-print("W = Solo Word (.docx)")
-print("A = Tutti e tre i formati (HTML, PDF, DOCX)")
-print("=" * 40)
-
-choice = input("\nScegli il formato: H | P | W | A? ").strip().upper()
-
-# Fallback: se l'utente non seleziona nulla, viene usato il default PDF
-if not choice or choice == "":
-    print("Nessuna selezione - uso il default: PDF (.pdf)")
-    choice = "P"
-
-if choice not in ['H', 'P', 'W', 'A']:
-    print("Selezione non valida. Uscita dal programma.")
-    sys.exit(1)
-
-# ── Input file ──
-arg = sys.argv[1] if len(sys.argv) > 1 else 'text_to_convert.md'
-src = Path(arg)
-if not src.is_absolute():
-    src = SCRIPT_DIR / src
-
-if not src.exists():
-    print(f"File non trovato: {src}")
-    sys.exit(1)
-
-# ── Nome del file di output ──
-default_stem = src.with_suffix('').name
-output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip()
-stem = Path(output_name) if output_name else src.with_suffix('')
-
-# ── Determinazione file di output e richiesta consenso ──
-# Questi percorsi devono corrispondere esattamente a quelli usati piu' sotto
-# per salvare i file (stem.with_suffix(...)), altrimenti il controllo di
-# esistenza guarda nella cartella sbagliata e non rileva i file da sovrascrivere.
-target_files = []
-
-if choice in ['H', 'A']:
-    target_files.append(stem.with_suffix('.html'))
-if choice in ['P', 'A']:
-    target_files.append(stem.with_suffix('.pdf'))
-if choice in ['W', 'A']:
-    target_files.append(stem.with_suffix('.docx'))
-
-if not target_files:
-    # Caso in cui nessun output è selezionato (non dovrebbe accadere con i controlli precedenti, ma è una safety measure)
-    print("\nNessun formato di output selezionato. Uscita dal programma.")
-    sys.exit(0)
-
-# La conferma di sovrascrittura va chiesta solo per i file che esistono
-# gia' con quel nome - se nessuno dei file target esiste, si procede
-# direttamente senza interrompere il flusso con una domanda inutile.
-existing_files = [f for f in target_files if f.exists()]
-
-if existing_files:
-    print("\n" + "=" * 40)
-    print("=== ATTENZIONE: FILE DI OUTPUT GIA' ESISTENTI === ")
-    print("I file seguenti esistono gia' e verranno sovrascritti:")
-    for i, f in enumerate(existing_files):
-        print(f"{i+1}. {f.name}")
-    print("=" * 40)
-
-    confirmation = input("\nVuoi procedere con la sovrascrittura dei file mostrati?(S/N) [Default N]: ").strip().upper()
-
-    if confirmation == 'S':
-        # Consenso ricevuto, continua l'esecuzione
-        pass
-    else:
-        print("\nOk allora non devo fare nulla. Uscita dal programma.")
-        sys.exit(0) # Termina lo script senza salvare file
-
-
-# ── Lettura del contenuto Markdown ──
-print("\nLettura del file Markdown in corso...")
-try:
-    md_text = open(src, encoding='utf-8-sig').read()
-except UnicodeDecodeError:
-    print("Attenzione: il file non e' UTF-8, provo con la codifica Windows-1252 (cp1252)...")
-    md_text = open(src, encoding='cp1252').read()
-# The document title/subtitle shown above the TOC comes from the front
-# matter (if any), not from the first '#' heading, which is now numbered
-# and indexed like any other chapter - so the metadata must be read before
-# strip_frontmatter discards the block.
-frontmatter_fields = extract_frontmatter_fields(md_text)
-doc_title = frontmatter_fields.get('title')
-doc_subtitle = frontmatter_fields.get('subtitle')
-md_text = strip_frontmatter(md_text)
-# Rimuovi l'eventuale TOC scritta a mano nel markdown sorgente: HTML, PDF e DOCX
-# generano tutti la propria TOC automatica piu' avanti, quindi quella originale
-# sarebbe solo duplicata.
-md_text = strip_md_toc(md_text)
-print(f"Letti: {len(md_text)} caratteri.")
-
-# ── Convert Markdown to HTML (required for HTML/PDF output) ──
-needs_html = choice in ['H', 'P', 'A']
-body_html = None
-if needs_html and MARKDOWN_AVAILABLE:
-    body_html = convert_to_html(md_text)
-    body_html = shrink_wide_tables(body_html)
-
 # ── CSS stylesheet for HTML/PDF rendering ──
 # Includes TOC styling and anchor links for clickable navigation
 CSS = """
@@ -1090,89 +985,196 @@ def slugify(text):
     return text or 'section'
 
 
-# ── Assemble the HTML document with a hierarchical TOC (mirrors the Word TOC) ──
-html_doc = None
-if body_html is not None:
-    # Numbers h1-h3 (1, 1.1, 1.1.1 ...) like the Word version, gives every heading
-    # a unique anchor id, and collects h1-h3 entries for the TOC.
-    h_counters = [0, 0, 0]
-    used_ids = {}
-    toc_entries = []  # (level, numbered_text, anchor_id)
+def main():
+    # ── Menu interattivo per la scelta del formato di output ──
+    print("\n" + "=" * 40)
+    print("=== Conversione file Markdown (con TOC per HTML/PDF) ===")
+    print("=" * 40)
+    print("H = Solo HTML (.html)")
+    print("P = Solo PDF (.pdf)  <-- DEFAULT")
+    print("W = Solo Word (.docx)")
+    print("A = Tutti e tre i formati (HTML, PDF, DOCX)")
+    print("=" * 40)
 
-    def add_heading_id(match_obj):
-        level = int(match_obj.group(1))
-        inner_html = match_obj.group(2)
+    choice = input("\nScegli il formato: H | P | W | A? ").strip().upper()
 
-        text_plain = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', inner_html)
-        text_plain = re.sub(r'<[^>]+>', '', text_plain)
-        text_plain = ' '.join(text_plain.split())
+    # Fallback: se l'utente non seleziona nulla, viene usato il default PDF
+    if not choice or choice == "":
+        print("Nessuna selezione - uso il default: PDF (.pdf)")
+        choice = "P"
 
-        display_html = inner_html
-        if level in (1, 2, 3):
-            # H1 is the chapter counter (1, 2, 3...); H2 nests under its
-            # enclosing H1 (1.1, 1.2...); H3 nests under its enclosing H2
-            # (1.1.1, 1.1.2...). Missing ancestor levels (e.g. a document
-            # jumping straight to H2/H3) are treated as chapter/section 1
-            # so numbering never shows a leading "0".
-            if level == 1:
-                h_counters[0] += 1
-                h_counters[1] = 0
-                h_counters[2] = 0
-                numbering = f"{h_counters[0]}"
-            elif level == 2:
-                if h_counters[0] == 0:
-                    h_counters[0] = 1
-                h_counters[1] += 1
-                h_counters[2] = 0
-                numbering = f"{h_counters[0]}.{h_counters[1]}"
-            else:
-                if h_counters[0] == 0:
-                    h_counters[0] = 1
-                if h_counters[1] == 0:
-                    h_counters[1] = 1
-                h_counters[2] += 1
-                numbering = f"{h_counters[0]}.{h_counters[1]}.{h_counters[2]}"
-            display_html = f"{numbering} {inner_html}"
-            text_plain = f"{numbering} {text_plain}"
+    if choice not in ['H', 'P', 'W', 'A']:
+        print("Selezione non valida. Uscita dal programma.")
+        sys.exit(1)
 
-        base_id = slugify(text_plain)
-        seen = used_ids.get(base_id, 0)
-        used_ids[base_id] = seen + 1
-        anchor_id = base_id if seen == 0 else f"{base_id}-{seen}"
+    # ── Input file ──
+    arg = sys.argv[1] if len(sys.argv) > 1 else 'text_to_convert.md'
+    src = Path(arg)
+    if not src.is_absolute():
+        src = SCRIPT_DIR / src
 
-        if level in (1, 2, 3):
-            toc_entries.append((level, display_html, anchor_id))
+    if not src.exists():
+        print(f"File non trovato: {src}")
+        sys.exit(1)
 
-        # FIX: PDF links were broken because xhtml2pdf (reportlab engine) ignores
-        # the name="..." attribute set directly on h1..h6 - it only recognizes a
-        # standalone <a name="..."> tag as an internal link target, and discards
-        # empty ones during rendering (known bug). So we prepend the anchor tag
-        # with a non-breaking space inside: id="..." is used as the target for
-        # links in HTML export, while <a name="..."> makes PDF links clickable.
-        return (
-            f'<a name="{anchor_id}">&nbsp;</a>'
-            f'<h{level} id="{anchor_id}" class="anchor">{display_html}</h{level}>'
+    # ── Nome del file di output ──
+    default_stem = src.with_suffix('').name
+    output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip()
+    stem = Path(output_name) if output_name else src.with_suffix('')
+
+    # ── Determinazione file di output e richiesta consenso ──
+    # Questi percorsi devono corrispondere esattamente a quelli usati piu' sotto
+    # per salvare i file (stem.with_suffix(...)), altrimenti il controllo di
+    # esistenza guarda nella cartella sbagliata e non rileva i file da sovrascrivere.
+    target_files = []
+
+    if choice in ['H', 'A']:
+        target_files.append(stem.with_suffix('.html'))
+    if choice in ['P', 'A']:
+        target_files.append(stem.with_suffix('.pdf'))
+    if choice in ['W', 'A']:
+        target_files.append(stem.with_suffix('.docx'))
+
+    if not target_files:
+        # Caso in cui nessun output è selezionato (non dovrebbe accadere con i controlli precedenti, ma è una safety measure)
+        print("\nNessun formato di output selezionato. Uscita dal programma.")
+        sys.exit(0)
+
+    # La conferma di sovrascrittura va chiesta solo per i file che esistono
+    # gia' con quel nome - se nessuno dei file target esiste, si procede
+    # direttamente senza interrompere il flusso con una domanda inutile.
+    existing_files = [f for f in target_files if f.exists()]
+
+    if existing_files:
+        print("\n" + "=" * 40)
+        print("=== ATTENZIONE: FILE DI OUTPUT GIA' ESISTENTI === ")
+        print("I file seguenti esistono gia' e verranno sovrascritti:")
+        for i, f in enumerate(existing_files):
+            print(f"{i+1}. {f.name}")
+        print("=" * 40)
+
+        confirmation = input("\nVuoi procedere con la sovrascrittura dei file mostrati?(S/N) [Default N]: ").strip().upper()
+
+        if confirmation == 'S':
+            # Consenso ricevuto, continua l'esecuzione
+            pass
+        else:
+            print("\nOk allora non devo fare nulla. Uscita dal programma.")
+            sys.exit(0) # Termina lo script senza salvare file
+
+
+    # ── Lettura del contenuto Markdown ──
+    print("\nLettura del file Markdown in corso...")
+    try:
+        md_text = open(src, encoding='utf-8-sig').read()
+    except UnicodeDecodeError:
+        print("Attenzione: il file non e' UTF-8, provo con la codifica Windows-1252 (cp1252)...")
+        md_text = open(src, encoding='cp1252').read()
+    # The document title/subtitle shown above the TOC comes from the front
+    # matter (if any), not from the first '#' heading, which is now numbered
+    # and indexed like any other chapter - so the metadata must be read before
+    # strip_frontmatter discards the block.
+    frontmatter_fields = extract_frontmatter_fields(md_text)
+    doc_title = frontmatter_fields.get('title')
+    doc_subtitle = frontmatter_fields.get('subtitle')
+    md_text = strip_frontmatter(md_text)
+    # Rimuovi l'eventuale TOC scritta a mano nel markdown sorgente: HTML, PDF e DOCX
+    # generano tutti la propria TOC automatica piu' avanti, quindi quella originale
+    # sarebbe solo duplicata.
+    md_text = strip_md_toc(md_text)
+    print(f"Letti: {len(md_text)} caratteri.")
+
+    # ── Convert Markdown to HTML (required for HTML/PDF output) ──
+    needs_html = choice in ['H', 'P', 'A']
+    body_html = None
+    if needs_html and MARKDOWN_AVAILABLE:
+        body_html = convert_to_html(md_text)
+        body_html = shrink_wide_tables(body_html)
+
+
+    # ── Assemble the HTML document with a hierarchical TOC (mirrors the Word TOC) ──
+    html_doc = None
+    if body_html is not None:
+        # Numbers h1-h3 (1, 1.1, 1.1.1 ...) like the Word version, gives every heading
+        # a unique anchor id, and collects h1-h3 entries for the TOC.
+        h_counters = [0, 0, 0]
+        used_ids = {}
+        toc_entries = []  # (level, numbered_text, anchor_id)
+
+        def add_heading_id(match_obj):
+            level = int(match_obj.group(1))
+            inner_html = match_obj.group(2)
+
+            text_plain = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', inner_html)
+            text_plain = re.sub(r'<[^>]+>', '', text_plain)
+            text_plain = ' '.join(text_plain.split())
+
+            display_html = inner_html
+            if level in (1, 2, 3):
+                # H1 is the chapter counter (1, 2, 3...); H2 nests under its
+                # enclosing H1 (1.1, 1.2...); H3 nests under its enclosing H2
+                # (1.1.1, 1.1.2...). Missing ancestor levels (e.g. a document
+                # jumping straight to H2/H3) are treated as chapter/section 1
+                # so numbering never shows a leading "0".
+                if level == 1:
+                    h_counters[0] += 1
+                    h_counters[1] = 0
+                    h_counters[2] = 0
+                    numbering = f"{h_counters[0]}"
+                elif level == 2:
+                    if h_counters[0] == 0:
+                        h_counters[0] = 1
+                    h_counters[1] += 1
+                    h_counters[2] = 0
+                    numbering = f"{h_counters[0]}.{h_counters[1]}"
+                else:
+                    if h_counters[0] == 0:
+                        h_counters[0] = 1
+                    if h_counters[1] == 0:
+                        h_counters[1] = 1
+                    h_counters[2] += 1
+                    numbering = f"{h_counters[0]}.{h_counters[1]}.{h_counters[2]}"
+                display_html = f"{numbering} {inner_html}"
+                text_plain = f"{numbering} {text_plain}"
+
+            base_id = slugify(text_plain)
+            seen = used_ids.get(base_id, 0)
+            used_ids[base_id] = seen + 1
+            anchor_id = base_id if seen == 0 else f"{base_id}-{seen}"
+
+            if level in (1, 2, 3):
+                toc_entries.append((level, display_html, anchor_id))
+
+            # FIX: PDF links were broken because xhtml2pdf (reportlab engine) ignores
+            # the name="..." attribute set directly on h1..h6 - it only recognizes a
+            # standalone <a name="..."> tag as an internal link target, and discards
+            # empty ones during rendering (known bug). So we prepend the anchor tag
+            # with a non-breaking space inside: id="..." is used as the target for
+            # links in HTML export, while <a name="..."> makes PDF links clickable.
+            return (
+                f'<a name="{anchor_id}">&nbsp;</a>'
+                f'<h{level} id="{anchor_id}" class="anchor">{display_html}</h{level}>'
+            )
+
+        html_with_ids = re.sub(
+            r'<h([1-6])\b[^>]*>(.*?)</h\1>',
+            add_heading_id,
+            body_html,
+            flags=re.S,
         )
 
-    html_with_ids = re.sub(
-        r'<h([1-6])\b[^>]*>(.*?)</h\1>',
-        add_heading_id,
-        body_html,
-        flags=re.S,
-    )
+        level_class = {1: 'toc-l1', 2: 'toc-l2', 3: 'toc-l3'}
+        toc_links_html = '\n'.join(
+            f'<li class="{level_class[level]}"><a href="#{anchor_id}">{text}</a></li>'
+            for level, text, anchor_id in toc_entries
+        )
 
-    level_class = {1: 'toc-l1', 2: 'toc-l2', 3: 'toc-l3'}
-    toc_links_html = '\n'.join(
-        f'<li class="{level_class[level]}"><a href="#{anchor_id}">{text}</a></li>'
-        for level, text, anchor_id in toc_entries
-    )
+        title_box_html = ''
+        if doc_title:
+            subtitle_html = f'<div class="doc-subtitle">{doc_subtitle}</div>' if doc_subtitle else ''
+            title_box_html = f'<h1 class="doc-title">{doc_title}</h1>{subtitle_html}'
 
-    title_box_html = ''
-    if doc_title:
-        subtitle_html = f'<div class="doc-subtitle">{doc_subtitle}</div>' if doc_subtitle else ''
-        title_box_html = f'<h1 class="doc-title">{doc_title}</h1>{subtitle_html}'
-
-    html_doc = f"""<!DOCTYPE html>
+        html_doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>Converted Document</title>
 <style>{CSS}</style></head>
@@ -1192,38 +1194,42 @@ if body_html is not None:
 {html_with_ids}</body>
 </html>"""
 
-# ── Generazione dei file in base alla scelta dell'utente ──
-if choice in ['H', 'A']:
-    if html_doc is not None:
-        html_path = stem.with_suffix('.html')
-        html_path.write_text(html_doc, encoding='utf-8')
-        print(f"Generato: {html_path}")
-    else:
-        _missing('markdown')
-        print("Generazione HTML saltata.")
+    # ── Generazione dei file in base alla scelta dell'utente ──
+    if choice in ['H', 'A']:
+        if html_doc is not None:
+            html_path = stem.with_suffix('.html')
+            html_path.write_text(html_doc, encoding='utf-8')
+            print(f"Generato: {html_path}")
+        else:
+            _missing('markdown')
+            print("Generazione HTML saltata.")
 
-if choice in ['P', 'A']:
-    if html_doc is None:
-        _missing('markdown')
-        print("Generazione PDF saltata.")
-    elif not XHTML2PDF_AVAILABLE:
-        _missing('xhtml2pdf')
-        print("Generazione PDF saltata.")
-    else:
-        pdf_path = stem.with_suffix('.pdf')
-        if html_to_pdf(html_doc, pdf_path):
-            print(f"Generato: {pdf_path}")
+    if choice in ['P', 'A']:
+        if html_doc is None:
+            _missing('markdown')
+            print("Generazione PDF saltata.")
+        elif not XHTML2PDF_AVAILABLE:
+            _missing('xhtml2pdf')
+            print("Generazione PDF saltata.")
+        else:
+            pdf_path = stem.with_suffix('.pdf')
+            if html_to_pdf(html_doc, pdf_path):
+                print(f"Generato: {pdf_path}")
 
-# La conversione Word usa il testo gia' processato (TOC rimossa dal markdown sorgente)
-if choice in ['W', 'A']:
-    if DOCX_AVAILABLE:
-        word_path = stem.with_suffix('.docx')
-        if create_word_from_md(md_text, word_path, doc_title=doc_title, doc_subtitle=doc_subtitle):
-            print(f"Generato: {word_path}")
-    else:
-        _missing('python-docx')
-        print("Generazione DOCX saltata.")
+    # La conversione Word usa il testo gia' processato (TOC rimossa dal markdown sorgente)
+    if choice in ['W', 'A']:
+        if DOCX_AVAILABLE:
+            word_path = stem.with_suffix('.docx')
+            if create_word_from_md(md_text, word_path, doc_title=doc_title, doc_subtitle=doc_subtitle):
+                print(f"Generato: {word_path}")
+        else:
+            _missing('python-docx')
+            print("Generazione DOCX saltata.")
 
-print("\n" + "=" * 40)
-print("Conversione completata!")
-print("=" * 40)
+    print("\n" + "=" * 40)
+    print("Conversione completata!")
+    print("=" * 40)
+
+
+if __name__ == "__main__":
+    main()
