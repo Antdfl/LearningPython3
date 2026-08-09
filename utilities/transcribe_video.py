@@ -96,8 +96,6 @@ def extract_audio_from_video(video_path):
     # If ffmpeg is found, extract the audio
     if ffmpeg_exe is not None:
         try:
-            import subprocess  # Local import to avoid conflicts
-            
             # FFmpeg command for extracting audio:
             # -i     : Input file (the video)
             # -vn   : Disable video extraction (audio only)
@@ -121,8 +119,6 @@ def extract_audio_from_video(video_path):
     
     # Fallback second attempt: try with system ffmpeg from PATH
     try:
-        import subprocess
-        
         print("Trying system ffmpeg from PATH...")
         subprocess.run(
             ["ffmpeg", "-i", video_path, 

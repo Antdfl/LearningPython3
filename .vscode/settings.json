@@ -1,17 +1,30 @@
 {
     "cSpell.words": [
+        "acodec",
+        "checkmark",
         "colorgram",
         "dotenv",
         "exitonclick",
         "Favourite",
         "hirst",
-        "País"
+        "País",
+        "pyaudio",
+        "speechrecognition"
     ],
-    "python.defaultInterpreterPath": "E:\\code\\LearningPython\\.venv\\Scripts\\python.exe",
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
     "python.analysis.extraPaths": [
-        "E:\\code\\LearningPython\\.venv\\Lib\\site-packages"
+        "${workspaceFolder}/.venv/Lib/site-packages"
     ],
     "python.terminal.activateEnvironment": true,
     "python.analysis.useImportHeuristic": true,
-    "python.analysis.typeCheckingMode": "off"
+    "python.analysis.typeCheckingMode": "off",
+    "python.testing.unittestArgs": [
+        "-v",
+        "-s",
+        "utilities",
+        "-p",
+        "test_*.py"
+    ],
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestEnabled": true
 }
