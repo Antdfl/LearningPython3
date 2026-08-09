@@ -31,9 +31,16 @@ from speech_recognition import Recognizer, AudioFile, UnknownValueError, Request
 import time                # For measuring total elapsed processing time
 import wave               # For reading and writing WAV audio files
 
-# Windows consoles default to the cp1252 codepage, which cannot encode the
-# checkmark/cross characters used in status messages below; force UTF-8.
-sys.stdout.reconfigure(encoding="utf-8")
+
+def _print_safe(message):
+    """Prints message, replacing characters the console encoding can't handle
+    (e.g. checkmark/cross symbols on a Windows cp1252 console) instead of
+    crashing with UnicodeEncodeError."""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(message.encode(encoding, errors="replace").decode(encoding))
 
 
 # ============================================================
@@ -265,7 +272,7 @@ def save_transcription(text, output_path):
             f.write(text)
         
         # Print confirmation message
-        print(f"✓ Transcription saved to {output_path}")
+        _print_safe(f"✓ Transcription saved to {output_path}")
         
     except FileNotFoundError:
         # Error handling: directory does not exist
@@ -361,15 +368,15 @@ def main():
         print("STEP 1/3: Extracting audio from video...")
         temp_audio_path = extract_audio_from_video(input_path)
         if temp_audio_path:
-            print(f"✓ Audio extracted to {temp_audio_path}")
+            _print_safe(f"✓ Audio extracted to {temp_audio_path}")
         else:
-            print("✗ Failed to extract audio. Cannot continue.")
+            _print_safe("✗ Failed to extract audio. Cannot continue.")
             return
 
         # STEP 2: Transcribe audio to text
         print("\nSTEP 2/3: Transcribing audio to text...")
         transcription = transcribe_audio(temp_audio_path, language=language)
-        print("✓ Transcription completed.")
+        _print_safe("✓ Transcription completed.")
 
         # STEP 3: Save transcribed text
         print("\nSTEP 3/3: Saving transcription...")
@@ -377,20 +384,20 @@ def main():
 
     except FileNotFoundError as e:
         # Error handling: file not found
-        print(f"\n✗ Error: File not found - {e}")
+        _print_safe(f"\n✗ Error: File not found - {e}")
         print("   Please check that the input file path is correct.")
-        
+
     except Exception as e:
         # Generic error handling
-        print(f"\n✗ Error during transcription: {e}")
-    
+        _print_safe(f"\n✗ Error during transcription: {e}")
+
     finally:
         # STEP CLEANUP: Remove temporary audio file if it exists
         temp_audio_path = "temp_audio.wav"
         if os.path.exists(temp_audio_path):
             try:
                 os.remove(temp_audio_path)
-                print("✓ Temporary audio file removed.")
+                _print_safe("✓ Temporary audio file removed.")
             except Exception as e:
                 print(f"Warning: Could not remove temp file: {e}")
 
@@ -408,5 +415,8 @@ def main():
 # MAIN ENTRY POINT
 # ============================================================
 if __name__ == "__main__":
-    # This block runs only when the script is executed directly (not imported)
+    # This block runs only when the script is executed directly (not imported).
+    # Windows consoles default to the cp1252 codepage, which cannot encode the
+    # checkmark/cross characters used in status messages below; force UTF-8.
+    sys.stdout.reconfigure(encoding="utf-8")
     main()
