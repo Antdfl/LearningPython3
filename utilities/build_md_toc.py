@@ -150,7 +150,7 @@ def strip_md_toc(md_text):
     IMPORTANT: The first H1 heading (the document title) is never removed, only the TOC
     block that follows it.
 
-    Parameters:
+    Args:
         md_text (str): The raw Markdown content string.
 
     Returns:
@@ -244,6 +244,9 @@ def strip_md_toc(md_text):
 def convert_to_html(md_text):
     """Converts Markdown text to HTML string using the 'markdown' library.
 
+    Args:
+        md_text (str): The raw Markdown content string to be converted.
+
     Returns:
         str: The converted HTML string with tables, sane lists, and new line breaks supported.
     """
@@ -303,21 +306,31 @@ def _longest_word_len(cell_html: str) -> int:
 
 def shrink_wide_tables(html_content, max_cols_before_shrink=6):
     """Gives explicit per-column widths (and smaller font/padding) to tables
-    with many columns.
+    with many columns, so they fit within the page's printable width.
 
-    xhtml2pdf/reportlab compute column widths automatically from cell content.
-    With many narrow columns this auto-calculation can produce a negative
-    available width and crash (ValueError: ... negative availWidth ...).
-    Setting an explicit width on each header cell avoids that code path.
+    When a markdown table has many narrow columns, xhtml2pdf's automatic width
+    calculation can produce a negative available width and crash with
+    "ValueError: ... negative availWidth ...". This function detects such cases
+    and applies explicit per-column widths (in points) plus smaller font/padding
+    to prevent the error.
 
-    Widths are set in absolute points (derived from the page's printable
-    width) rather than percentages: xhtml2pdf resolves table-cell '%' widths
-    against the full page width, not the margin-adjusted printable area, so
-    percentage widths cause the last column(s) to spill past the right margin.
+    Widths are set in absolute points (derived from the page's printable width)
+    rather than percentages: xhtml2pdf resolves table-cell '%' widths against
+    the full page width, not the margin-adjusted printable area, so percentage
+    widths cause the last column(s) to spill past the right margin.
 
-    Column widths are proportional to each column's content (the longest
-    cell text in that column), with a minimum floor, so text-heavy columns
+    Column widths are proportional to each column's content (the longest cell
+    text in that column), with a minimum floor, so text-heavy columns
     (e.g. free-text notes) get more room than short numeric ones.
+
+    Args:
+        html_content (str): The HTML content containing one or more tables.
+        max_cols_before_shrink (int): Column-count threshold above which a
+            table's widths get explicitly resized. Defaults to 6. Tables with
+            <= this many columns are returned unchanged.
+
+    Returns:
+        str: Modified HTML with adjusted tables that fit within page margins.
     """
     def process_table(match):
         table_html = match.group(0)
@@ -411,6 +424,11 @@ def shrink_wide_tables(html_content, max_cols_before_shrink=6):
 def html_to_pdf(html_content, output_path):
     """Converts an HTML string to a PDF file using the 'xhtml2pdf' library.
 
+    Args:
+        html_content (str): The complete HTML document content, including @page CSS
+            with margin settings (210mm - 32mm = 178mm printable width).
+        output_path (Path or str): Path where the PDF file will be written.
+
     Returns:
         bool: True if the PDF was generated successfully, False otherwise.
     """
@@ -442,10 +460,16 @@ def build_toc(doc, has_headings, insert_after=None):
     what makes the F9 update path (confirmed working by the user) kick in.
 
     Args:
-        insert_after: xml element (e.g. a heading paragraph's ._p) the TOC block
+        doc (Document): The python-docx Document object to modify.
+        has_headings (bool): Whether the document has any headings (H1-H3).
+            If False, no TOC is generated and this function returns immediately.
+        insert_after: Optional xml element (e.g. a heading paragraph's ._p) the TOC block
             should be placed right after - typically the document title, so the
             title reads before the TOC instead of being pushed after it. Falls
             back to inserting at the very start of the document when None.
+
+    Returns:
+        None. Returns early (without inserting anything) if has_headings is False.
     """
     if not has_headings:
         return
@@ -523,8 +547,7 @@ def build_toc(doc, has_headings, insert_after=None):
 
 
 def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None):
-    """
-    Creates a Microsoft Word document (.docx) from Markdown source with automatic
+    """Creates a Microsoft Word document (.docx) from Markdown source with automatic
     Table of Contents (TOC) generation. Supports all standard Markdown syntax
     including headings, lists, tables, images, links, and code blocks.
 
@@ -550,11 +573,14 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
 
     Args:
         md_text (str): The full Markdown content as a string
-        output_path (Path): Path where the .docx file will be saved
-        doc_title (str): Optional document title (from front matter),
-            rendered with the big built-in "Title" style before the TOC.
-        doc_subtitle (str): Optional subtitle (from front matter), rendered
-            right under doc_title. Ignored if doc_title is not given.
+        output_path: Path where the .docx file will be saved
+        doc_title (str, optional): Optional document title (from front matter),
+            rendered with the big built-in "Title" style before the TOC. Defaults to None.
+        doc_subtitle (str, optional): Optional subtitle (from front matter), rendered
+            right under doc_title. Ignored if doc_title is not given. Defaults to None.
+
+    Returns:
+        bool: True if document was saved successfully, False on error.
     """
     def split_table_row(row_line):
         # Helper: splits a markdown table row by '|' into individual cell content
@@ -971,13 +997,23 @@ img { max-width: 100%; height: auto; }
 """
 
 def slugify(text):
-    """Convert heading text to a safe, unique anchor ID.
+    """Converts a string to a URL-safe anchor ID for headings.
+
+    Performs NFKD normalization, strips non-word characters, collapses whitespace,
+    and lowercases the result. Returns an empty string or 'section' if input is empty.
 
     FIX: Previously, TOC links calculated the anchor from text using a
     different rule than the one used to generate IDs on headings, so they
     never matched. Now both <a href="#..."> from TOC and heading IDs pass
     through this single function (with duplicate handling done by caller),
     so they always stay aligned.
+
+    Args:
+        text (str): The heading text to convert into a slug.
+
+    Returns:
+        str: A URL-safe anchor ID (lowercase, hyphen-separated words). Empty
+            string or 'section' if the input was empty after normalization.
     """
     text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
     text = re.sub(r'[^\w\s-]', '', text).strip().lower()
