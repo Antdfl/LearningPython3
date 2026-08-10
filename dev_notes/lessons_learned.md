@@ -65,6 +65,13 @@ This file compiles specific findings from recent coding sessions to prevent recu
 *   **Fix applied to `.clinerules`:** Added rule requiring small, sequential, individually-verified edits on long/complex files, and forbidding "rewrite from memory" as a recovery strategy when a search/replace match fails — the correct recovery is to re-read the current file from disk and retry with a smaller, more precise block.
 *   **Files affected:** `utilities/build_md_toc.py` (reverted, no lasting damage)
 
+### `utilities/transcribe_video.py` — Qwen (32k context) produced bloated docstring + misindented comment (Date: 2026-08-10)
+*   **What went wrong:** Local Qwen model, run with context window lowered to 32k, was asked to work on `transcribe_video.py`. Unprompted, it (1) expanded a concise, already-good docstring on `_print_safe()` into a verbose `Args:`/`Returns:`/`ERRORS:` boilerplate block that violates this project's "no comments unless they explain a non-obvious why" convention, and (2) reworded an inline comment above `except UnknownValueError:` and in doing so re-indented it to 16 spaces instead of the 20 spaces matching the surrounding block, leaving it visually misaligned with the code it annotates.
+*   **Impact:** No functional/behavioral change and the file still compiled fine (`py_compile` passes — comment-only lines don't affect Python's INDENT/DEDENT tracking), but the diff was noisy and the misindentation would read as sloppy/inconsistent to a human reviewer.
+*   **How it was fixed:** `git checkout -- utilities/transcribe_video.py` (single pending file, full revert was safe).
+*   **Root cause:** Same family as the `build_md_toc.py` doc-only incidents above (models treat "add/improve comments" as license to over-document), plus a new failure mode: the model didn't preserve the exact leading-whitespace column of the comment it rewrote, even though the line's *content* was the only thing it should have changed.
+*   **Files affected:** `utilities/transcribe_video.py` (reverted, no lasting damage)
+
 ### Process Note: `day-68-flask-auth/main.py` (Date: 2026-03-10)
 *   **Anomaly:** Minimal change was required—only a docstring rewrite for the `login()` function, with no change to core logic or structure.
 *   **Lesson:** Routine structural changes (like updating documentation) are generally safe when only minor comment updates occur and the surrounding code context is carefully managed.
@@ -90,6 +97,14 @@ This file compiles specific findings from recent coding sessions to prevent recu
 ### Rule: Contextual Awareness and Verification
 *   **Rule:** When performing documentation or refactoring tasks, treat the source material as sacred ground. Always verify changes using a `diff` tool (e.g., `git diff`) to ensure that *only* comments/docstrings have changed and no functional code lines were accidentally altered. For multi-file projects, process files individually.
 *   **Originates from:** Preventive rule, not yet tied to a documented incident
+*   **Scope:** All LLMs/models.
+
+### Rule: Comment/Docstring Style — Indentation & Conciseness
+*   **Rule:** When adding, rewording, or improving a comment or docstring:
+    1.  **Match the leading whitespace of the code it sits next to.** An inline `#` comment on its own line must be indented to the exact same column as the statement immediately below/around it — never less, never more. Copy the indentation character-for-character from the surrounding line rather than retyping it.
+    2.  **Keep it as short as the original, or shorter.** Do not expand a one-line comment into a multi-line block, and do not add `Args:`/`Returns:`/`Raises:`/`ERRORS:` sections to a docstring unless the function's signature is genuinely non-obvious and the project's own style already uses that format elsewhere. A comment should only exist to explain a non-obvious *why* (a workaround, a platform quirk, a hidden constraint) — never to restate *what* the code already says via its names.
+    3.  **After the edit, re-check the diff visually for indentation drift**, not just for wording — `git diff` can make a 4-space indentation change hard to spot at a glance next to a wording change; look at the leading whitespace column specifically.
+*   **Originates from:** `utilities/transcribe_video.py` — Qwen incident (2026-08-10, see above)
 *   **Scope:** All LLMs/models.
 
 ### ⚠️ To be classified
