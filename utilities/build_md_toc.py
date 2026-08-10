@@ -591,6 +591,66 @@ def build_toc(doc, has_headings, insert_after=None):
         body.insert(0, sdt)
 
 
+_INLINE_MD_PATTERN = re.compile(r'(`[^`]+`|\*\*.+?\*\*|\*.+?\*)')
+
+
+def strip_inline_markers(text):
+    """Removes Markdown inline formatting markers (**bold**, *italic*, `code`)
+    from a string, keeping only the wrapped text. Used for H1-H3 headings,
+    which are already bold via their Word "Heading" style, so the raw
+    markers never show up literally in the heading/TOC.
+
+    Args:
+        text (str): Text that may contain inline Markdown formatting markers.
+
+    Returns:
+        str: The same text with the markers stripped, wrapped text unchanged.
+    """
+    text = re.sub(r'`([^`]+)`', r'\1', text)
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    return text
+
+
+def add_inline_runs(paragraph, text, code_font='Consolas'):
+    """Parses inline Markdown formatting (**bold**, *italic*, `code`) out of
+    a line of text and appends it to a Word paragraph as separate runs with
+    the matching formatting applied.
+
+    FIX: The previous implementation converted these markers to HTML tags
+    (<strong>/<em>/<code>) and then stripped ALL HTML tags with a single
+    regex before handing the text to doc.add_paragraph() - so the markers
+    were removed but the intended bold/italic/code formatting was silently
+    dropped, leaving plain unformatted text (or, for list items/headings/
+    table cells, which never went through this pipeline at all, the raw
+    **markers** left in place, exactly as reported).
+
+    Args:
+        paragraph: The python-docx Paragraph object to append runs to.
+        text (str): A line of plain text, potentially containing inline
+            Markdown bold/italic/code markers.
+        code_font (str): Font name applied to inline code runs. Defaults to
+            'Consolas' to match the fenced code block styling.
+
+    Returns:
+        None.
+    """
+    for part in _INLINE_MD_PATTERN.split(text):
+        if not part:
+            continue
+        if part.startswith('`') and part.endswith('`') and len(part) >= 2:
+            run = paragraph.add_run(part[1:-1])
+            run.font.name = code_font
+        elif part.startswith('**') and part.endswith('**') and len(part) >= 4:
+            run = paragraph.add_run(part[2:-2])
+            run.font.bold = True
+        elif part.startswith('*') and part.endswith('*') and len(part) >= 2:
+            run = paragraph.add_run(part[1:-1])
+            run.font.italic = True
+        else:
+            paragraph.add_run(part)
+
+
 def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None):
     """Creates a Microsoft Word document (.docx) from Markdown source with automatic
     Table of Contents (TOC) generation. Supports all standard Markdown syntax
@@ -752,12 +812,12 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
 
                     # Fill in header cells (first row)
                     for k, cell_text in enumerate(header_cells[:num_cols]):
-                        table.rows[0].cells[k].text = cell_text
+                        add_inline_runs(table.rows[0].cells[k].paragraphs[0], cell_text)
 
                     # Fill in body cells (data rows)
                     for r, cells in enumerate(body_rows, start=1):
                         for k, cell_text in enumerate(cells[:num_cols]):
-                            table.rows[r].cells[k].text = cell_text
+                            add_inline_runs(table.rows[r].cells[k].paragraphs[0], cell_text)
 
                     i = j  # Move to next section
                     continue
@@ -818,7 +878,7 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
                         h_counters[2] += 1
                         numbering = f"{h_counters[0]}.{h_counters[1]}.{h_counters[2]}"
 
-                    numbered_text = f"{numbering} {title_clean}"
+                    numbered_text = f"{numbering} {strip_inline_markers(title_clean)}"
                     heading = doc.add_heading(numbered_text, level=level)
                     has_headings = True
                     if title_element is None:
@@ -826,22 +886,25 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
                 elif level == 4:
                     # Level 4 headings are too deep for TOC, render as custom paragraph
                     p = doc.add_paragraph()
-                    run = p.add_run(title_clean)
+                    add_inline_runs(p, title_clean)
                     # Match the theme's major (heading) font used by the real
                     # H1-H3 headings and the Title style, since H4 is styled
                     # to look like a heading even though it's not TOC-tracked.
-                    run.font.name = 'Calibri'
-                    run.font.size = Pt(14)
+                    for run in p.runs:
+                        run.font.name = 'Calibri'
+                        run.font.size = Pt(14)
                 elif level == 5:
                     # Level 5 headings are very small detail headers
                     p = doc.add_paragraph()
-                    run = p.add_run(title_clean)
-                    run.font.size = Pt(12)
+                    add_inline_runs(p, title_clean)
+                    for run in p.runs:
+                        run.font.size = Pt(12)
                 else:  # h6
                     # Level 6 headings are fine print / footer-level text
                     p = doc.add_paragraph()
-                    run = p.add_run(title_clean)
-                    run.font.size = Pt(10)
+                    add_inline_runs(p, title_clean)
+                    for run in p.runs:
+                        run.font.size = Pt(10)
 
                 i += 1
                 continue
@@ -851,7 +914,8 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
             ul_match = re.match(r'^(\s*[-*+]\s+)(.+)$', line_stripped)
             if ul_match:
                 list_item_text = ul_match.group(2).strip()
-                p = doc.add_paragraph(list_item_text)
+                p = doc.add_paragraph()
+                add_inline_runs(p, list_item_text)
                 i += 1
                 continue
 
@@ -861,7 +925,9 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
             if ol_match:
                 list_num = ol_match.group(1)
                 list_item_text = ol_match.group(2).strip()
-                p = doc.add_paragraph(f"{list_num}. {list_item_text}")
+                p = doc.add_paragraph()
+                p.add_run(f"{list_num}. ")
+                add_inline_runs(p, list_item_text)
                 i += 1
                 continue
 
@@ -870,30 +936,19 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
             quote_match = re.match(r'^"(.+)"$', line_stripped)
             if quote_match:
                 quote_text = quote_match.group(1).replace('"', '"')
-                p = doc.add_paragraph('" ' + quote_text + '"', style='Quote')
+                p = doc.add_paragraph(style='Quote')
+                p.add_run('" ')
+                add_inline_runs(p, quote_text)
+                p.add_run('"')
                 i += 1
                 continue
-            
-            # ── Inline Code (`code`) ──
-            # Detect markdown inline code and wrap in HTML <code> tags
-            code_inline = re.sub(r'`([^`]+)`', r'<code>\1</code>', line_stripped)
-            
-            # ── Bold Text (**text**) ──
-            # Detect bold formatting and convert to HTML <strong> tags
-            bold_inline = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', code_inline)
-            
-            # ── Italic Text (*text*) ──
-            # Detect italic formatting and convert to HTML <em> tags
-            italic_inline = re.sub(r'\*(.+?)\*', r'<em>\1</em>', bold_inline)
-            
-            # ── Clean HTML Tags ──
-            # Remove any raw HTML tags that were in the original markdown
-            clean_text = re.sub(r'<[^>]+>', '', italic_inline)
-            
+
             # ── Regular Paragraph Text ──
-            # Add remaining text as a regular paragraph (not heading/list/quote/etc.)
-            if clean_text.strip():
-                p = doc.add_paragraph(clean_text)
+            # Add remaining text as a regular paragraph (not heading/list/quote/etc.),
+            # with inline **bold**/*italic*/`code` rendered as real Word formatting.
+            if line:
+                p = doc.add_paragraph()
+                add_inline_runs(p, line)
 
             i += 1
 
