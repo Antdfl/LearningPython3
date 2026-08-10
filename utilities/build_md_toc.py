@@ -62,7 +62,8 @@ except ImportError:
 
 try:
     from docx import Document
-    from docx.shared import Pt, Inches, RGBColor
+    from docx.shared import Pt, Inches, Cm, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
     DOCX_AVAILABLE = True
@@ -444,6 +445,50 @@ def html_to_pdf(html_content, output_path):
         return False
 
 
+def add_page_number_footer(section):
+    """Adds a right-aligned page-number field to a section's footer.
+
+    Inserts the real `{ PAGE }` field (same fldChar begin/instrText/separate/end
+    pattern as build_toc's TOC field) so Word/LibreOffice compute and keep the
+    number in sync as pages are added or removed, from the first page to the
+    last.
+
+    Args:
+        section: A python-docx Section object (e.g. doc.sections[0]) whose
+            footer should get the page number.
+
+    Returns:
+        None.
+    """
+    footer = section.footer
+    paragraph = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+    r_begin = OxmlElement('w:r')
+    fld_begin = OxmlElement('w:fldChar')
+    fld_begin.set(qn('w:fldCharType'), 'begin')
+    r_begin.append(fld_begin)
+
+    r_instr = OxmlElement('w:r')
+    instr_text = OxmlElement('w:instrText')
+    instr_text.set(qn('xml:space'), 'preserve')
+    instr_text.text = ' PAGE '
+    r_instr.append(instr_text)
+
+    r_separate = OxmlElement('w:r')
+    fld_separate = OxmlElement('w:fldChar')
+    fld_separate.set(qn('w:fldCharType'), 'separate')
+    r_separate.append(fld_separate)
+
+    r_end = OxmlElement('w:r')
+    fld_end = OxmlElement('w:fldChar')
+    fld_end.set(qn('w:fldCharType'), 'end')
+    r_end.append(fld_end)
+
+    for el in (r_begin, r_instr, r_separate, r_end):
+        paragraph._p.append(el)
+
+
 def build_toc(doc, has_headings, insert_after=None):
     """Builds a native, updatable Table of Contents field for Word documents.
 
@@ -571,6 +616,26 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
     - Links [text](url)
     - Images ![alt](path)
 
+    Document Format:
+    - Page: ISO A4 (21.0 x 29.7 cm), portrait - overrides python-docx's
+      built-in default of US Letter (21.59 x 27.94 cm).
+    - Margins: left 2.5 cm / right 2.10 cm are set explicitly (an
+      asymmetric pair matching the printable width used by the HTML/PDF
+      outputs). Top and bottom margins (2.54 cm / 1 inch each) and the
+      header/footer distance (1.27 cm / 0.5 inch) are left at python-docx's
+      built-in template defaults - only left/right are overridden here.
+    - Fonts: no custom font or theme is defined in code, so text renders in
+      whatever fonts the built-in python-docx template's Office theme
+      assigns to each style. Body text (the Normal style) uses the theme's
+      minor font, Cambria; the Title style and Heading 1-3 use the theme's
+      major font, Calibri - a humanist sans-serif (its letterforms follow
+      classic handwritten proportions rather than the rigid geometric grid
+      of a grotesque sans like Arial/Helvetica). The one explicit override
+      is fenced code blocks, forced to the monospace font Consolas.
+    - Footer: every page gets a right-aligned, auto-updating page-number
+      field, added via add_page_number_footer() (see its docstring for how
+      the field mechanism works).
+
     Args:
         md_text (str): The full Markdown content as a string
         output_path: Path where the .docx file will be saved
@@ -598,6 +663,17 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
 
     try:
         doc = Document()
+
+        section = doc.sections[0]
+        # A4 portrait (overrides python-docx's built-in US Letter default);
+        # only left/right margins are set here - top/bottom margin and the
+        # header/footer distance stay at the built-in template defaults
+        # (2.54 cm / 1 inch top+bottom, 1.27 cm / 0.5 inch header/footer).
+        section.page_width = Cm(21.0)
+        section.page_height = Cm(29.7)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.10)
+        add_page_number_footer(section)
 
         h_counters = [0, 0, 0]
         has_headings = False
@@ -751,7 +827,10 @@ def create_word_from_md(md_text, output_path, doc_title=None, doc_subtitle=None)
                     # Level 4 headings are too deep for TOC, render as custom paragraph
                     p = doc.add_paragraph()
                     run = p.add_run(title_clean)
-                    run.font.name = 'Heading'
+                    # Match the theme's major (heading) font used by the real
+                    # H1-H3 headings and the Title style, since H4 is styled
+                    # to look like a heading even though it's not TOC-tracked.
+                    run.font.name = 'Calibri'
                     run.font.size = Pt(14)
                 elif level == 5:
                     # Level 5 headings are very small detail headers
@@ -1022,7 +1101,7 @@ def slugify(text):
 
 
 def main():
-    # ── Menu interattivo per la scelta del formato di output ──
+    # ── Interactive menu for choosing the output format ──
     print("\n" + "=" * 40)
     print("=== Conversione file Markdown (con TOC per HTML/PDF) ===")
     print("=" * 40)
@@ -1034,7 +1113,7 @@ def main():
 
     choice = input("\nScegli il formato: H | P | W | A? ").strip().upper()
 
-    # Fallback: se l'utente non seleziona nulla, viene usato il default PDF
+    # Fallback: if the user doesn't select anything, PDF is used as the default
     if not choice or choice == "":
         print("Nessuna selezione - uso il default: PDF (.pdf)")
         choice = "P"
@@ -1053,15 +1132,15 @@ def main():
         print(f"File non trovato: {src}")
         sys.exit(1)
 
-    # ── Nome del file di output ──
+    # ── Output file name ──
     default_stem = src.with_suffix('').name
     output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip()
     stem = Path(output_name) if output_name else src.with_suffix('')
 
-    # ── Determinazione file di output e richiesta consenso ──
-    # Questi percorsi devono corrispondere esattamente a quelli usati piu' sotto
-    # per salvare i file (stem.with_suffix(...)), altrimenti il controllo di
-    # esistenza guarda nella cartella sbagliata e non rileva i file da sovrascrivere.
+    # ── Determine output files and request confirmation ──
+    # These paths must match exactly the ones used further down
+    # to save the files (stem.with_suffix(...)), otherwise the existence
+    # check looks in the wrong folder and fails to detect files to overwrite.
     target_files = []
 
     if choice in ['H', 'A']:
@@ -1072,13 +1151,13 @@ def main():
         target_files.append(stem.with_suffix('.docx'))
 
     if not target_files:
-        # Caso in cui nessun output è selezionato (non dovrebbe accadere con i controlli precedenti, ma è una safety measure)
+        # Case where no output is selected (shouldn't happen given the earlier checks, but it's a safety measure)
         print("\nNessun formato di output selezionato. Uscita dal programma.")
         sys.exit(0)
 
-    # La conferma di sovrascrittura va chiesta solo per i file che esistono
-    # gia' con quel nome - se nessuno dei file target esiste, si procede
-    # direttamente senza interrompere il flusso con una domanda inutile.
+    # Overwrite confirmation should only be asked for files that already
+    # exist with that name - if none of the target files exist, proceed
+    # directly without interrupting the flow with an unnecessary question.
     existing_files = [f for f in target_files if f.exists()]
 
     if existing_files:
@@ -1092,14 +1171,14 @@ def main():
         confirmation = input("\nVuoi procedere con la sovrascrittura dei file mostrati?(S/N) [Default N]: ").strip().upper()
 
         if confirmation == 'S':
-            # Consenso ricevuto, continua l'esecuzione
+            # Consent received, continue execution
             pass
         else:
             print("\nOk allora non devo fare nulla. Uscita dal programma.")
-            sys.exit(0) # Termina lo script senza salvare file
+            sys.exit(0) # Terminate the script without saving files
 
 
-    # ── Lettura del contenuto Markdown ──
+    # ── Read Markdown content ──
     print("\nLettura del file Markdown in corso...")
     try:
         md_text = open(src, encoding='utf-8-sig').read()
@@ -1114,9 +1193,9 @@ def main():
     doc_title = frontmatter_fields.get('title')
     doc_subtitle = frontmatter_fields.get('subtitle')
     md_text = strip_frontmatter(md_text)
-    # Rimuovi l'eventuale TOC scritta a mano nel markdown sorgente: HTML, PDF e DOCX
-    # generano tutti la propria TOC automatica piu' avanti, quindi quella originale
-    # sarebbe solo duplicata.
+    # Remove any hand-written TOC in the source markdown: HTML, PDF and DOCX
+    # all generate their own automatic TOC further down, so the original
+    # one would just be duplicated.
     md_text = strip_md_toc(md_text)
     print(f"Letti: {len(md_text)} caratteri.")
 
@@ -1230,7 +1309,7 @@ def main():
 {html_with_ids}</body>
 </html>"""
 
-    # ── Generazione dei file in base alla scelta dell'utente ──
+    # ── Generate the files based on the user's choice ──
     if choice in ['H', 'A']:
         if html_doc is not None:
             html_path = stem.with_suffix('.html')
@@ -1252,7 +1331,7 @@ def main():
             if html_to_pdf(html_doc, pdf_path):
                 print(f"Generato: {pdf_path}")
 
-    # La conversione Word usa il testo gia' processato (TOC rimossa dal markdown sorgente)
+    # The Word conversion uses the already-processed text (TOC removed from the source markdown)
     if choice in ['W', 'A']:
         if DOCX_AVAILABLE:
             word_path = stem.with_suffix('.docx')
