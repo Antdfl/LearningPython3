@@ -1,3 +1,8 @@
+"""
+Blog for deployment (SQLite/PostgreSQL support).
+
+Supports SQLite database by default, with optional PostgreSQL via environment variables.
+"""
 import os
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -5,6 +10,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import Integer, String, Text, inspect
 
 class Base(DeclarativeBase):
+    """Base class for declarative model definitions."""
     pass
 
 app = Flask(__name__)
@@ -15,6 +21,7 @@ uri = (os.environ.get('POSTGRES_URI')
        or os.environ.get('DATABASE_URL')
        or os.environ.get('DB_URI'))
 
+# Fix: postgres:// must be replaced with postgresql:// for SQLAlchemy compatibility
 if uri and uri.startswith('postgres://'):
     uri = uri.replace('postgres://', 'postgresql://', 1)
 
@@ -27,6 +34,7 @@ db = SQLAlchemy(model_class=Base)
 db.init_app(app)
 
 class BlogPost(db.Model):
+    """Blog post model for the application."""
     __tablename__ = "blog_posts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     author_id: Mapped[int] = mapped_column(Integer, db.ForeignKey("users.id"))
@@ -39,6 +47,7 @@ class BlogPost(db.Model):
     comments = relationship("Comment", back_populates="parent_post")
 
 class User(db.Model):
+    """User authentication model for the application."""
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(100), unique=True)
@@ -48,6 +57,7 @@ class User(db.Model):
     comments = relationship("Comment", back_populates="comment_author")
 
 class Comment(db.Model):
+    """Comment model linking users to blog posts."""
     __tablename__ = "comments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -64,6 +74,7 @@ with app.app_context():
 
 @app.route('/')
 def index():
+    """Display database type and schema information."""
     db_type = 'PostgreSQL' if 'postgresql' in uri else 'SQLite'
     safe_uri = uri.split('@')[-1] if '@' in uri else uri
     return (f'<h2>Database: {db_type}</h2>'
