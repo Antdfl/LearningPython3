@@ -46,21 +46,25 @@ login_manager.init_app(app)
 
 @login_manager.user_loader
 def load_user(user_id):
+    """Loads a user from the database using their user ID."""
     return db.get_or_404(User, user_id)
 
 
 @app.errorhandler(404)
 def page_not_found(e):
+    """Returns the HTML page for error 404."""
     return render_template('404.html'), 404
 
 
 @app.errorhandler(500)
 def internal_error(e):
+    """Returns the HTML page for internal error 500."""
     return render_template('500.html'), 500
 
 
 @app.template_filter('gravatar')
 def gravatar_filter(email, size=100, rating='g', default='retro'):
+    """Returns a Gravatar avatar image using the user's email address."""
     hash_val = hashlib.md5(email.lower().strip().encode()).hexdigest()
     return f"https://www.gravatar.com/avatar/{hash_val}?s={size}&d={default}&r={rating}"
 
@@ -69,6 +73,7 @@ class Base(DeclarativeBase):
     pass
 
 def get_database_uri():
+    """Returns the database URI from environment variables."""
     env_keys = [
         'POSTGRES_URI',
         'DB_URI',
@@ -95,6 +100,7 @@ db.init_app(app)
 
 # CONFIGURE TABLES
 class BlogPost(db.Model):
+    """Blog Post model table."""
     __tablename__ = "blog_posts"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     # Create Foreign Key, "users.id" the users refers to the tablename of User.
@@ -112,6 +118,7 @@ class BlogPost(db.Model):
 
 # Create a User table for all your registered users
 class User(UserMixin, db.Model):
+    """User model with authentication."""
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(100), unique=True)
@@ -126,6 +133,7 @@ class User(UserMixin, db.Model):
 
 # Create a table for the comments on the blog posts
 class Comment(db.Model):
+    """Comment model for blog posts."""
     __tablename__ = "comments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
@@ -144,6 +152,7 @@ with app.app_context():
 
 # Create an admin-only decorator
 def admin_only(f):
+    """Decorator to restrict access to admin users only."""
     @wraps(f)
     def decorated_function(*args, **kwargs):
         # If id is not 1 then return abort with 403 error
@@ -158,6 +167,7 @@ def admin_only(f):
 # Register new users into the User database
 @app.route('/register', methods=["GET", "POST"])
 def register():
+    """Registers a new user in the database."""
     form = RegisterForm()
     if form.validate_on_submit():
 
@@ -189,6 +199,7 @@ def register():
 
 @app.route('/login', methods=["GET", "POST"])
 def login():
+    """Logs in a user with email and password."""
     form = LoginForm()
     if form.validate_on_submit():
         password = form.password.data
@@ -212,12 +223,14 @@ def login():
 
 @app.route('/logout')
 def logout():
+    """Logs the current user out."""
     logout_user()
     return redirect(url_for('get_all_posts'))
 
 
 @app.route('/')
 def get_all_posts():
+    """Returns a list of all blog posts."""
     result = db.session.execute(db.select(BlogPost))
     posts = result.scalars().all()
     return render_template("index.html", all_posts=posts, current_user=current_user)
@@ -226,6 +239,7 @@ def get_all_posts():
 # Add a POST method to be able to post comments
 @app.route("/post/<int:post_id>", methods=["GET", "POST"])
 def show_post(post_id):
+    """Displays a single blog post and handles its comments."""
     requested_post = db.get_or_404(BlogPost, post_id)
     # Add the CommentForm to the route
     comment_form = CommentForm()
@@ -249,6 +263,7 @@ def show_post(post_id):
 @app.route("/new-post", methods=["GET", "POST"])
 @admin_only
 def add_new_post():
+    """Creates a new blog post (admin only)."""
     form = CreatePostForm()
     if form.validate_on_submit():
         new_post = BlogPost(
@@ -268,6 +283,7 @@ def add_new_post():
 # Use a decorator so only an admin user can edit a post
 @app.route("/edit-post/<int:post_id>", methods=["GET", "POST"])
 def edit_post(post_id):
+    """Edits an existing blog post."""
     post = db.get_or_404(BlogPost, post_id)
     edit_form = CreatePostForm(
         title=post.title,
@@ -291,6 +307,7 @@ def edit_post(post_id):
 @app.route("/delete/<int:post_id>")
 @admin_only
 def delete_post(post_id):
+    """Deletes a blog post (admin only)."""
     post_to_delete = db.get_or_404(BlogPost, post_id)
     db.session.delete(post_to_delete)
     db.session.commit()
@@ -299,11 +316,13 @@ def delete_post(post_id):
 
 @app.route("/about")
 def about():
+    """Returns the about page."""
     return render_template("about.html", current_user=current_user)
 
 
 @app.route("/contact", methods=["GET", "POST"])
 def contact():
+    """Returns the contact page."""
     return render_template("contact.html", current_user=current_user)
 
 # Optional: You can include the email sending code from Day 60:
