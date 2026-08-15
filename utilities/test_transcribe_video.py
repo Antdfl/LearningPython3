@@ -22,7 +22,10 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import transcribe_video as m
 
@@ -31,13 +34,14 @@ class TestSaveTranscription(unittest.TestCase):
     def test_writes_text_to_file(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_path = os.path.join(tmp_dir, "out.txt")
-            m.save_transcription("Ciao mondo", output_path)
+            with redirect_stdout(io.StringIO()):
+                m.save_transcription("Ciao mondo", output_path)
             with open(output_path, encoding="utf-8") as f:
                 self.assertEqual(f.read(), "Ciao mondo")
 
     def test_missing_directory_raises_and_reports(self):
         missing_path = os.path.join(tempfile.gettempdir(), "no_such_dir_xyz", "out.txt")
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(FileNotFoundError), redirect_stdout(io.StringIO()):
             m.save_transcription("text", missing_path)
 
 
@@ -46,7 +50,8 @@ class TestExtractAudioFromVideo(unittest.TestCase):
         # Neither the venv's ffmpeg.exe nor a system ffmpeg on PATH exists,
         # so the function should give up cleanly and return None (not raise).
         with patch("transcribe_video.os.path.exists", return_value=False), \
-             patch("transcribe_video.subprocess.run", side_effect=FileNotFoundError):
+             patch("transcribe_video.subprocess.run", side_effect=FileNotFoundError), \
+             redirect_stdout(io.StringIO()):
             result = m.extract_audio_from_video("some_video.mp4")
         self.assertIsNone(result)
 
