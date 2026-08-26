@@ -181,11 +181,19 @@ def strip_md_toc(md_text):
         r'^###\s*Contenuto\s*$',
     ]
 
+    def _normalize_heading(s):
+        """Strips any decorative characters (emoji, bullets, symbols) that may sit
+        between the '#' markers and the heading text - e.g. '## \U0001F4CB INDICE' -
+        so the heading_patterns above only need to match the plain text. Keeping this
+        separate from `stripped` (used for is_list_item/is_anchor_list_item) avoids
+        touching anything else that relies on the original line content."""
+        return re.sub(r'^(#{1,3})\s*[^\w#]*\s*', r'\1 ', s)
+
     def is_list_item(s):
-        return bool(re.match(r'^\s*[-*+]\s+', s))
+        return bool(re.match(r'^\s*(?:[-*+]|\d+[.)])\s+', s))
 
     def is_anchor_list_item(s):
-        return bool(re.match(r'^\s*[-*+]\s+.*\[.+?\]\(#.*?\)', s))
+        return bool(re.match(r'^\s*(?:[-*+]|\d+[.)])\s+.*\[.+?\]\(#.*?\)', s))
 
     # Locate the first H1 (document title); the TOC search starts right after it.
     title_idx = None
@@ -207,7 +215,8 @@ def strip_md_toc(md_text):
             continue
 
         heading_line_idx = None
-        if any(re.match(p, stripped) for p in heading_patterns):
+        normalized_heading = _normalize_heading(stripped)
+        if any(re.match(p, normalized_heading, re.IGNORECASE) for p in heading_patterns):
             heading_line_idx = i
             j = i + 1
             while j < search_limit and not lines[j].strip():
@@ -283,6 +292,47 @@ def escape_false_headings(md_text):
                     line = '\\' + line
         out_lines.append(line)
     return '\n'.join(out_lines)
+
+
+_H1_LINE_RE = re.compile(r'^#\s+(.+)$')
+
+
+def promote_first_heading_as_title(md_text):
+    """Promotes the document's very first H1 heading to be the (unnumbered,
+    not-in-TOC) document title, matching how a front-matter 'title:' field
+    is handled - instead of the previous behaviour where a document with no
+    front matter had its first H1 become "Chapter 1" and get listed in the
+    TOC like any other heading.
+
+    Only called when the document has no front-matter title. Fenced code
+    blocks are skipped so a '# comment' inside a code sample is never
+    mistaken for the real heading.
+
+    Args:
+        md_text (str): Markdown content, front matter already stripped.
+
+    Returns:
+        tuple[str, str | None]: The markdown with the first H1 line removed,
+        and the extracted plain-text title (inline markdown/link markers
+        stripped, since it is rendered as a raw title, not re-parsed as
+        Markdown). If no H1 is found, returns (md_text, None) unchanged.
+    """
+    lines = md_text.split('\n')
+    in_fence = False
+    for i, line in enumerate(lines):
+        if _FENCE_LINE_RE.match(line.lstrip()):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = _H1_LINE_RE.match(line)
+        if match:
+            title_text = match.group(1).strip()
+            title_text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', title_text)
+            title_text = strip_inline_markers(title_text)
+            del lines[i]
+            return '\n'.join(lines), title_text
+    return md_text, None
 
 
 _PRE_BLOCK_RE = re.compile(r'<pre>\s*(?:<code\b[^>]*>)?(.*?)(?:</code>)?\s*</pre>', re.S)
@@ -1340,6 +1390,16 @@ def main():
     doc_title = frontmatter_fields.get('title')
     doc_subtitle = frontmatter_fields.get('subtitle')
     md_text = strip_frontmatter(md_text)
+    # A document with no front-matter title still needs an unnumbered title
+    # instead of having its very first H1 become "Chapter 1" in the TOC -
+    # promote it exactly like a front-matter title would be handled. This
+    # runs before strip_md_toc() so the hand-written-TOC search (which looks
+    # for content "right after the title") still lines up correctly once the
+    # title line itself is gone.
+    if not doc_title:
+        md_text, promoted_title = promote_first_heading_as_title(md_text)
+        if promoted_title:
+            doc_title = promoted_title
     # Remove any hand-written TOC in the source markdown: HTML, PDF and DOCX
     # all generate their own automatic TOC further down, so the original
     # one would just be duplicated.
@@ -1413,8 +1473,16 @@ def main():
             # empty ones during rendering (known bug). So we prepend the anchor tag
             # with a non-breaking space inside: id="..." is used as the target for
             # links in HTML export, while <a name="..."> makes PDF links clickable.
+            #
+            # FIX 2: that non-breaking space was rendering as a visible dash right
+            # before every single heading in the PDF - confirmed by isolating the
+            # anchor tag in a minimal repro (xhtml2pdf/reportlab draws &nbsp; using
+            # a hyphen-like glyph instead of leaving it blank). Shrinking the anchor
+            # to 1px and making it transparent keeps it non-empty (so xhtml2pdf still
+            # registers it as a link target - confirmed via a real internal link
+            # jumping to the right page) while making it visually imperceptible.
             return (
-                f'<a name="{anchor_id}">&nbsp;</a>'
+                f'<a name="{anchor_id}" style="font-size:1px;line-height:1px;color:transparent;">&nbsp;</a>'
                 f'<h{level} id="{anchor_id}" class="anchor">{display_html}</h{level}>'
             )
 
