@@ -242,6 +242,85 @@ def strip_md_toc(md_text):
     return '\n'.join(result_lines)
 
 
+_LEADING_HASH_RE = re.compile(r'^(#{1,6})(.*)$')
+_FENCE_LINE_RE = re.compile(r'^(```|~~~)')
+
+
+def escape_false_headings(md_text):
+    """Neutralizes lines that start with 1-6 '#' characters but are not real
+    Markdown ATX headings, before handing text to the 'markdown' library.
+
+    The 'markdown' library's heading detection is more permissive than the
+    CommonMark rule it is usually associated with: it treats ANY line
+    starting with 1-6 '#' as a heading, even with no space afterwards (e.g.
+    '#2 ...' used as a post number, or a lone '#PySpark' hashtag). A real
+    ATX heading always has whitespace (or nothing) right after the hashes,
+    so that is the signal used here to tell the two apart.
+
+    Lines inside fenced code blocks (```/~~~) are left untouched, since a
+    line like '#!/usr/bin/env python' or a '# comment' there is code, not a
+    false heading, and must reach the renderer unescaped.
+
+    Args:
+        md_text (str): Raw Markdown content, before markdown.markdown().
+
+    Returns:
+        str: The same text with false-heading lines prefixed by a
+            backslash, which 'markdown' renders as a literal '#'.
+    """
+    out_lines = []
+    in_fence = False
+    for line in md_text.split('\n'):
+        if _FENCE_LINE_RE.match(line.lstrip()):
+            in_fence = not in_fence
+            out_lines.append(line)
+            continue
+        if not in_fence:
+            match = _LEADING_HASH_RE.match(line)
+            if match:
+                rest = match.group(2)
+                if rest and not rest[0].isspace():
+                    line = '\\' + line
+        out_lines.append(line)
+    return '\n'.join(out_lines)
+
+
+_PRE_BLOCK_RE = re.compile(r'<pre>\s*(?:<code\b[^>]*>)?(.*?)(?:</code>)?\s*</pre>', re.S)
+
+
+def harden_code_blocks(html_content):
+    """Replaces <pre>/<pre><code> blocks with a <div class="codeblock">,
+    turning embedded newlines into explicit <br> tags.
+
+    xhtml2pdf (the PDF renderer) does not implement CSS 'white-space:
+    pre-wrap' correctly: it was tested to silently collapse ALL newlines
+    (including blank lines between paragraphs) exactly like 'normal' would,
+    while 'white-space: pre' preserves newlines but never wraps long lines,
+    letting them run off the right edge of the page. Neither single CSS
+    value gives both "keep the line breaks" and "wrap long lines".
+
+    The one approach confirmed (by rendering test PDFs) to do both
+    correctly in xhtml2pdf is the same one already relied on elsewhere in
+    this document via the 'nl2br' extension: real <br> tags plus ordinary
+    'white-space: normal' wrapping. This function applies that same trick
+    to fenced/indented code blocks, which the 'markdown' library always
+    renders as <pre> (optionally with a nested <code>) and leaves as raw
+    newlines instead of <br> tags.
+
+    Args:
+        html_content (str): HTML produced by markdown.markdown().
+
+    Returns:
+        str: The same HTML with every <pre>...</pre> replaced by a
+            '<div class="codeblock">' using <br> for line breaks.
+    """
+    def repl(match):
+        inner = match.group(1).rstrip('\n')
+        return f'<div class="codeblock">{inner.replace(chr(10), "<br>")}</div>'
+
+    return _PRE_BLOCK_RE.sub(repl, html_content)
+
+
 def convert_to_html(md_text):
     """Converts Markdown text to HTML string using the 'markdown' library.
 
@@ -249,9 +328,14 @@ def convert_to_html(md_text):
         md_text (str): The raw Markdown content string to be converted.
 
     Returns:
-        str: The converted HTML string with tables, sane lists, and new line breaks supported.
+        str: The converted HTML string with tables, sane lists, fenced code
+            blocks, and new line breaks supported.
     """
-    return markdown.markdown(md_text, extensions=['tables', 'sane_lists', 'nl2br'])
+    md_text = escape_false_headings(md_text)
+    html_content = markdown.markdown(
+        md_text, extensions=['tables', 'sane_lists', 'nl2br', 'fenced_code']
+    )
+    return harden_code_blocks(html_content)
 
 
 # Printable width of the PDF page (A4 minus the left/right margins set in the
@@ -1072,22 +1156,30 @@ li { margin-bottom: 3px; }
 strong { color: #1e3c72; font-weight: bold; }
 em { color: #555; font-style: italic; }
 
-code { 
-    background: #f0f2f5; 
-    padding: 2px 6px; 
-    border-radius: 3px; 
-    font-family: 'Consolas','Courier New',monospace; 
-    font-size: 9pt; 
+code {
+    background: #eef1f5;
+    color: #1e3c72;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: 'Consolas','Courier New',monospace;
+    font-size: 9pt;
 }
 
-pre { 
-    background: #f5f7fa; 
-    border-left: 3px solid #8fa8cf; 
-    padding: 10px 12px; 
-    margin: 8px 0 12px 0; 
-    overflow-x: auto; 
+/* Fenced/indented code blocks: harden_code_blocks() rewrites the
+   markdown library's <pre> output into this div (see its docstring for
+   why - xhtml2pdf's 'white-space: pre-wrap' silently drops line breaks). */
+.codeblock {
+    background: #2b2f3a;
+    color: #e8e8e8;
+    border-left: 4px solid #1e3c72;
+    padding: 10px 12px;
+    margin: 8px 0 12px 0;
+    font-family: 'Consolas','Courier New',monospace;
+    font-size: 9pt;
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
-pre code { background: none; padding: 0; }
 
 table {
     width: 100%;
