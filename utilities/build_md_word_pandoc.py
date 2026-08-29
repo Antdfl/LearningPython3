@@ -12,6 +12,45 @@ utilities/build_md_word_pandoc.py
 # handling, image embedding and TOC generation to Pandoc itself. Requires
 # Pandoc installed and on PATH - it is an external binary, not a pip
 # package.
+
+# Audience Note for Junior Programmers:
+# This script deliberately does NOT reimplement Markdown/DOCX handling the
+# way build_md_toc.py does. Pandoc already solves image embedding, list/table
+# formatting and TOC generation correctly, so calling out to it as a
+# subprocess avoids reinventing that logic - the tradeoff is an external
+# binary dependency instead of a pure pip package, so Pandoc must be
+# installed separately and be on PATH before this script can run.
+
+# Functionality Overview:
+# main() does the following, in order:
+# 1. Locates the pandoc executable via PATH (shutil.which); exits if missing.
+# 2. Resolves the source .md path and the reference.docx template path from
+#    command-line arguments, falling back to defaults relative to this
+#    script's folder.
+# 3. Prompts for an output filename and, if that file already exists, asks
+#    for overwrite confirmation before continuing.
+# 4. Reads the source file as UTF-8, falling back to cp1252 if decoding
+#    fails.
+# 5. Strips any existing hand-written TOC from the Markdown before Pandoc
+#    generates its own (--toc), to avoid a duplicated TOC.
+# 6. Writes the stripped Markdown to a temporary file in the SAME folder as
+#    the source, so relative image paths keep resolving without extra
+#    bookkeeping.
+# 7. Runs pandoc as a subprocess (--toc, --number-sections, --reference-doc)
+#    with its working directory pinned to the source folder, so Pandoc's own
+#    relative image-path resolution matches the source file's location.
+# 8. Deletes the temporary file in a finally block regardless of outcome.
+# 9. Reports Pandoc errors (and any non-fatal warnings on stderr) before
+#    printing the generated output path.
+
+# Dependencies:
+# - Pandoc: external CLI binary (https://pandoc.org), must be installed and
+#   on PATH - NOT installed via pip.
+# - md_shared.strip_md_toc: local helper module used to remove an existing
+#   hand-written TOC before conversion.
+# - reference.docx: a Word template file expected in this script's own
+#   folder (or an explicit path passed as the second command-line argument),
+#   used by Pandoc to style the generated document.
 """
 import shutil
 import subprocess
@@ -25,6 +64,15 @@ DEFAULT_REFERENCE_DOCX = SCRIPT_DIR / 'reference.docx'
 
 
 def main():
+    """
+    This function acts as a wrapper around the Pandoc CLI utility to convert Markdown (.md) files into professional Word (.docx) documents. It handles complex tasks like generating Table of Contents, embedding images, and styling the output using a specified reference DOCX template. The script orchestrates the entire conversion process by managing file paths, calling Pandoc with specific flags, and handling potential errors during the external execution.
+
+    Parameters:
+        None (The function accepts no explicit parameters).
+
+    Returns:
+        None (The function returns nothing; success/failure is communicated via exit codes or print statements).
+    """
     pandoc_exe = shutil.which('pandoc')
     if not pandoc_exe:
         print("Pandoc non trovato nel PATH. Installalo da https://pandoc.org/installing.html")
