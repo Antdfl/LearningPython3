@@ -1,3 +1,21 @@
+"""
+flight-deals/flight_search.py
+
+# Purpose: This module defines FlightSearch, a class that queries the
+# Amadeus flight-search API: resolving city names to IATA airport codes,
+# requesting an OAuth token, and searching flight offers between two cities.
+#
+# Audience Note for Junior Programmers:
+# Credentials AMADEUS_API_KEY/AMADEUS_API_SECRET come from environment
+# variables; the OAuth token is fetched once in __init__ and is NOT
+# automatically refreshed if it expires during a long-running session.
+#
+# Dependencies:
+# - requests (pip package): HTTP calls to the Amadeus API.
+# - python-dotenv (pip package): loads the .env file.
+# - datetime (standard library): used only for formatting dates in
+#   check_flights.
+"""
 import requests
 import os
 from datetime import datetime
@@ -9,13 +27,31 @@ TOKEN_ENDPOINT = "https://test.api.amadeus.com/v1/security/oauth2/token"
 load_dotenv()
 
 class FlightSearch:
+    """This class wraps three Amadeus API endpoints (IATA city lookup, OAuth token, flight offers search) behind three public methods, with the OAuth token obtained once at construction time and stored in self._token."""
+    
     #This class is responsible for talking to the Flight Search API.
     def __init__(self):
+        """Reads the two Amadeus credentials from environment variables and immediately calls self._get_new_token() to populate self._token before the object is usable.
+        
+        Parameters:
+            None
+        
+        Returns:
+            None
+        """
         self._api_key = os.environ["AMADEUS_API_KEY"]
         self._api_secret = os.environ["AMADEUS_API_SECRET"]
         self._token = self._get_new_token()
 
     def get_destination_code(self, city_name):
+        """Looks up a city name's IATA airport code via the Amadeus city-search endpoint. Returns the string "N/A" if the API response has no matching airport (IndexError) and "Not Found" if the response shape is unexpected (KeyError).
+
+        Parameters:
+            city_name (str): a city name to search for.
+
+        Returns:
+            str: the IATA code on success, or one of the two sentinel strings above on failure.
+        """
         print(f"city_name: {city_name}")
         headers = {"Authorization": f"Bearer {self._token}"}
         input_data = {
@@ -36,6 +72,14 @@ class FlightSearch:
         return code
 
     def _get_new_token(self):
+        """Requests a fresh OAuth2 access token from Amadeus using the client-credentials grant type, stores it in self._token, and returns it.
+
+        Parameters:
+            None
+
+        Returns:
+            str: the new access token.
+        """
         header = {
             'Content-Type': 'application/x-www-form-urlencoded'
         }
