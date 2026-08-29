@@ -10,6 +10,7 @@ chrome_profile/
 *.log
 .DS_Store
 .clinerules
+.cline/
 utilities/tesseract/
 *.ps1
 *.bat
