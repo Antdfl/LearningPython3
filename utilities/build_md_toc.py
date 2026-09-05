@@ -321,14 +321,24 @@ def _longest_word_len(cell_html: str) -> int:
 
 
 def shrink_wide_tables(html_content, max_cols_before_shrink=6):
-    """Gives explicit per-column widths (and smaller font/padding) to tables
-    with many columns, so they fit within the page's printable width.
+    """Gives explicit per-column widths (and, for wide tables, smaller
+    font/padding) to tables that need it, so they render correctly within
+    the page's printable width.
 
-    When a markdown table has many narrow columns, xhtml2pdf's automatic width
-    calculation can produce a negative available width and crash with
-    "ValueError: ... negative availWidth ...". This function detects such cases
-    and applies explicit per-column widths (in points) plus smaller font/padding
-    to prevent the error.
+    Two separate xhtml2pdf bugs are worked around here, both fixed by the
+    same "give every cell an explicit width" approach:
+
+    1. Many narrow columns: xhtml2pdf's automatic width calculation can
+       produce a negative available width and crash with "ValueError: ...
+       negative availWidth ...". Triggered once a table has more than
+       max_cols_before_shrink columns.
+    2. An empty header cell (e.g. a leading "row label" column with no
+       header text, as in "| | Inmon | Kimball |"): xhtml2pdf collapses
+       that column's width down to just its padding when it has no
+       explicit width, silently overlapping it with the next column's text
+       (confirmed by a reported PDF where two cells' text rendered on top
+       of each other, character-interleaved). This can happen even on a
+       small, narrow table, so it is checked independently of column count.
 
     Widths are set in absolute points (derived from the page's printable width)
     rather than percentages: xhtml2pdf resolves table-cell '%' widths against
@@ -342,22 +352,30 @@ def shrink_wide_tables(html_content, max_cols_before_shrink=6):
     Args:
         html_content (str): The HTML content containing one or more tables.
         max_cols_before_shrink (int): Column-count threshold above which a
-            table's widths get explicitly resized. Defaults to 6. Tables with
-            <= this many columns are returned unchanged.
+            table's font/padding also get shrunk. Defaults to 6. Tables at or
+            under this many columns keep the normal font/padding, but still
+            get explicit widths if they have an empty header cell (see bug 2
+            above).
 
     Returns:
-        str: Modified HTML with adjusted tables that fit within page margins.
+        str: Modified HTML with adjusted tables that fit within page margins
+            and don't suffer the empty-header-cell overlap bug.
     """
     def process_table(match):
         table_html = match.group(0)
         header_row_match = re.search(r'<tr>(.*?)</tr>', table_html, flags=re.S)
         if not header_row_match:
             return table_html
-        num_cols = len(re.findall(r'<th\b', header_row_match.group(1)))
-        if num_cols <= max_cols_before_shrink:
+        header_cells = re.findall(r'<th\b[^>]*>(.*?)</th>', header_row_match.group(1), flags=re.S)
+        num_cols = len(header_cells)
+        has_empty_header_cell = any(_cell_text_len(c) == 0 for c in header_cells)
+        if num_cols <= max_cols_before_shrink and not has_empty_header_cell:
             return table_html
 
-        extra_cols = num_cols - max_cols_before_shrink
+        # Font/padding only shrink once the table is actually wide; a small
+        # table processed solely for the empty-header-cell bug keeps the
+        # normal 9pt/6px sizing (extra_cols clamped to 0).
+        extra_cols = max(0, num_cols - max_cols_before_shrink)
         font_pt = max(6.0, 9.0 - extra_cols * 0.4)
         pad_px = max(2, 6 - extra_cols)
         # Rough Helvetica-Bold average glyph width, used to size each
@@ -982,12 +1000,25 @@ CSS = """
 @page { size: A4; margin: 18mm 16mm 16mm 16mm; }
 * { box-sizing: border-box; }
 
-body { 
-    font-family: 'Lato','Segoe UI',Helvetica,Arial,sans-serif; 
-    font-size: 10pt; 
-    line-height: 1.55; 
-    color: #2b2b2b; 
-    margin: 0; 
+body {
+    font-family: 'Lato','Segoe UI',Helvetica,Arial,sans-serif;
+    font-size: 10pt;
+    line-height: 1.55;
+    color: #2b2b2b;
+    margin: 0;
+}
+
+/* Side/top/bottom breathing room for the HTML file viewed in a browser,
+   in percentage so it scales with the viewport instead of a fixed px
+   value. Wrapped in @media screen because xhtml2pdf (confirmed by a
+   minimal repro: a red @media-screen background and a percentage padding
+   rule, neither of which showed up in the rendered PDF) does not process
+   @media blocks at all - so this rule is fully invisible to the PDF path,
+   which keeps using only the @page margins above for its own spacing. */
+@media screen {
+    body {
+        padding: 3% 6%;
+    }
 }
 
 h1, h2, h3, h4, h5, h6 {
