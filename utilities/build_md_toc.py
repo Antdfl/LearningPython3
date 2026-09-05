@@ -252,6 +252,56 @@ def harden_code_blocks(html_content):
     return _PRE_BLOCK_RE.sub(repl, html_content)
 
 
+# A bare, space-free token this long (a URL, a file path) is unusual for
+# ordinary inline code like `variable_name`, and is exactly the shape of
+# content that overflowed a table cell straight through the next column in
+# a reported PDF (see soften_long_code_tokens()).
+_LONG_TOKEN_CHARS = 20
+_HAIR_SPACE = ' '
+
+
+def soften_long_code_tokens(html_content):
+    """Inserts a break opportunity after every '/' and '-' in long,
+    space-free inline <code> tokens (typically a bare URL or file path,
+    e.g. `docs.oracle.com/en/database/oracle/oracle-database/19/sqlrf/
+    CREATE-MATERIALIZED-VIEW-LOG.html`), so xhtml2pdf can wrap them instead
+    of running them straight through the page/column edge and overlapping
+    whatever comes next.
+
+    xhtml2pdf only wraps at real whitespace. Confirmed with a minimal
+    repro (a long URL in a narrow table cell, rendered three different
+    ways): a zero-width space (U+200B) is not treated as a break point and
+    renders as a visible missing-glyph box; a literal '<wbr>' tag is
+    silently ignored; a soft hyphen (U+00AD) is also ignored. A real - if
+    very thin - U+200A "hair space" was the only one of the four that
+    xhtml2pdf actually wrapped at, while staying visually unobtrusive. It
+    is inserted right after every '/' and '-', which is where a URL or
+    path naturally breaks anyway (the same place a browser already wraps
+    `docs.oracle.com/en/database`-style text on screen).
+
+    Only touches <code> content that is a single unbroken token (no
+    existing whitespace) longer than _LONG_TOKEN_CHARS, so ordinary short
+    inline code like `variable_name` is left untouched.
+
+    Args:
+        html_content (str): HTML containing zero or more inline <code>
+            elements (from markdown.markdown(), before harden_code_blocks()
+            - this only touches inline <code>, not the <pre> fenced blocks
+            that function rewrites separately).
+
+    Returns:
+        str: The same HTML with hair spaces inserted into long code tokens.
+    """
+    def repl(match):
+        inner = match.group(1)
+        if len(inner) <= _LONG_TOKEN_CHARS or re.search(r'\s', inner):
+            return match.group(0)
+        softened = re.sub(r'([/-])', r'\1' + _HAIR_SPACE, inner)
+        return f'<code>{softened}</code>'
+
+    return re.sub(r'<code>(.*?)</code>', repl, html_content, flags=re.S)
+
+
 def convert_to_html(md_text):
     """Converts Markdown text to HTML string using the 'markdown' library.
 
@@ -266,6 +316,7 @@ def convert_to_html(md_text):
     html_content = markdown.markdown(
         md_text, extensions=['tables', 'sane_lists', 'nl2br', 'fenced_code']
     )
+    html_content = soften_long_code_tokens(html_content)
     return harden_code_blocks(html_content)
 
 
@@ -320,25 +371,45 @@ def _longest_word_len(cell_html: str) -> int:
     return max((len(w) for w in words), default=0)
 
 
+# A single unbroken token this long (a URL, a file path, an identifier) is
+# already unusual for ordinary prose, and is exactly the shape of content
+# that made bug 3 below fire in practice (bare `domain.tld/path/to/thing`
+# reference links inside a table cell).
+_LONG_WORD_CHARS = 20
+
+
 def shrink_wide_tables(html_content, max_cols_before_shrink=6):
     """Gives explicit per-column widths (and, for wide tables, smaller
     font/padding) to tables that need it, so they render correctly within
     the page's printable width.
 
-    Two separate xhtml2pdf bugs are worked around here, both fixed by the
+    Three separate xhtml2pdf bugs are worked around here, all fixed by the
     same "give every cell an explicit width" approach:
 
     1. Many narrow columns: xhtml2pdf's automatic width calculation can
        produce a negative available width and crash with "ValueError: ...
        negative availWidth ...". Triggered once a table has more than
        max_cols_before_shrink columns.
-    2. An empty header cell (e.g. a leading "row label" column with no
-       header text, as in "| | Inmon | Kimball |"): xhtml2pdf collapses
-       that column's width down to just its padding when it has no
-       explicit width, silently overlapping it with the next column's text
-       (confirmed by a reported PDF where two cells' text rendered on top
-       of each other, character-interleaved). This can happen even on a
-       small, narrow table, so it is checked independently of column count.
+    2. An empty cell anywhere in the table - a header with no text (e.g. a
+       leading "row label" column, as in "| | Inmon | Kimball |"), or just
+       as often a blank body cell in an otherwise-filled column (e.g. a
+       row where "Esito" and "Argomenti nuovi emersi" are left blank
+       because that item is still pending): xhtml2pdf collapses that
+       column's width down to just its padding the moment it meets a cell
+       with no explicit width and no content, silently overlapping it with
+       the next column's text (confirmed by two separate reported PDFs
+       with exactly this symptom - one from an empty header, one from an
+       empty body cell several rows into an otherwise normal 6-column
+       table). This can happen even on a small, narrow table, so every
+       cell in every row is checked, independently of column count.
+    3. A long unbreakable word/token in any cell (typically a bare URL like
+       `kimballgroup.com/2003/01/fact-tables-and-dimension-tables`, wrapped
+       in backticks as inline code): xhtml2pdf only wraps at whitespace, so
+       a token with no spaces runs past its column's automatically-computed
+       width and overlaps the next column's text (confirmed by a reported
+       PDF with exactly this symptom). Automatic layout has no hard-minimum
+       concept for this, so it is checked independently of column count and
+       header content, over every cell in the table (not just the header).
 
     Widths are set in absolute points (derived from the page's printable width)
     rather than percentages: xhtml2pdf resolves table-cell '%' widths against
@@ -354,12 +425,13 @@ def shrink_wide_tables(html_content, max_cols_before_shrink=6):
         max_cols_before_shrink (int): Column-count threshold above which a
             table's font/padding also get shrunk. Defaults to 6. Tables at or
             under this many columns keep the normal font/padding, but still
-            get explicit widths if they have an empty header cell (see bug 2
-            above).
+            get explicit widths if any cell is empty or if a long
+            unbreakable word appears anywhere in their cells (see bugs 2 and
+            3 above).
 
     Returns:
         str: Modified HTML with adjusted tables that fit within page margins
-            and don't suffer the empty-header-cell overlap bug.
+            and don't suffer the empty-cell or long-word overlap bugs.
     """
     def process_table(match):
         table_html = match.group(0)
@@ -368,13 +440,31 @@ def shrink_wide_tables(html_content, max_cols_before_shrink=6):
             return table_html
         header_cells = re.findall(r'<th\b[^>]*>(.*?)</th>', header_row_match.group(1), flags=re.S)
         num_cols = len(header_cells)
-        has_empty_header_cell = any(_cell_text_len(c) == 0 for c in header_cells)
-        if num_cols <= max_cols_before_shrink and not has_empty_header_cell:
+
+        # Longest cell text / longest single word per column, over every
+        # row - computed up front (not just for the header) so a long word
+        # or an empty cell buried in the body can also trigger the fix
+        # below, not only one in the header row.
+        max_len = [0] * num_cols
+        max_word_len = [0] * num_cols
+        has_empty_cell = False
+        for row_match in re.finditer(r'<tr>(.*?)</tr>', table_html, flags=re.S):
+            cells = re.findall(r'<t[dh]\b[^>]*>(.*?)</t[dh]>', row_match.group(1), flags=re.S)
+            for col_idx, cell_html in enumerate(cells[:num_cols]):
+                cell_len = _cell_text_len(cell_html)
+                max_len[col_idx] = max(max_len[col_idx], cell_len)
+                max_word_len[col_idx] = max(max_word_len[col_idx], _longest_word_len(cell_html))
+                if cell_len == 0:
+                    has_empty_cell = True
+
+        has_long_word = any(w > _LONG_WORD_CHARS for w in max_word_len)
+
+        if num_cols <= max_cols_before_shrink and not has_empty_cell and not has_long_word:
             return table_html
 
         # Font/padding only shrink once the table is actually wide; a small
-        # table processed solely for the empty-header-cell bug keeps the
-        # normal 9pt/6px sizing (extra_cols clamped to 0).
+        # table processed solely for the empty-header-cell or long-word bugs
+        # keeps the normal 9pt/6px sizing (extra_cols clamped to 0).
         extra_cols = max(0, num_cols - max_cols_before_shrink)
         font_pt = max(6.0, 9.0 - extra_cols * 0.4)
         pad_px = max(2, 6 - extra_cols)
@@ -382,15 +472,6 @@ def shrink_wide_tables(html_content, max_cols_before_shrink=6):
         # column's hard minimum from its longest unbreakable word.
         char_width_pt = font_pt * 0.62
         pad_pt = pad_px * 0.75 * 2  # px->pt, both sides
-
-        # Longest cell text / longest single word per column, over every row.
-        max_len = [0] * num_cols
-        max_word_len = [0] * num_cols
-        for row_match in re.finditer(r'<tr>(.*?)</tr>', table_html, flags=re.S):
-            cells = re.findall(r'<t[dh]\b[^>]*>(.*?)</t[dh]>', row_match.group(1), flags=re.S)
-            for col_idx, cell_html in enumerate(cells[:num_cols]):
-                max_len[col_idx] = max(max_len[col_idx], _cell_text_len(cell_html))
-                max_word_len[col_idx] = max(max_word_len[col_idx], _longest_word_len(cell_html))
 
         # Slight safety margin (0.97) to absorb border/rounding overhead.
         usable_width_pt = PAGE_CONTENT_WIDTH_PT * 0.97
