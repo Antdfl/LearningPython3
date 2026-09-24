@@ -99,7 +99,7 @@ def main():
     stem = Path(output_name) if output_name else src.with_suffix('')
     if not stem.is_absolute():
         stem = SCRIPT_DIR / stem
-    output_path = stem.with_suffix('.docx')
+    output_path = stem.parent / f"{stem.name}.docx"
 
     if output_path.exists():
         confirmation = input(
