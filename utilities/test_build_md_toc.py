@@ -61,6 +61,57 @@ class TestStripMdToc(unittest.TestCase):
         self.assertEqual(m.strip_md_toc(text), text)
 
 
+class TestReplaceUnsupportedGlyphs(unittest.TestCase):
+    # Sans-serif bold "Test" and italic "A", from the Mathematical
+    # Alphanumeric Symbols block - the Unicode "fake bold/italic" that
+    # LinkedIn text generators produce.
+    FAKE_BOLD_TEST = "\U0001D5E7\U0001D5F2\U0001D600\U0001D601"
+    FAKE_ITALIC_A = "\U0001D434"
+
+    def test_emoji_at_line_start_leaves_no_leading_space(self):
+        result = m.replace_unsupported_glyphs("✅ Capture the change.")
+        self.assertEqual(result, "Capture the change.")
+
+    def test_emoji_at_line_end_leaves_no_trailing_space(self):
+        result = m.replace_unsupported_glyphs("The query changes shape. \U0001F504")
+        self.assertEqual(result, "The query changes shape.")
+
+    def test_emoji_with_variation_selector_is_removed(self):
+        result = m.replace_unsupported_glyphs("⚠️ Warning: read this.")
+        self.assertEqual(result, "Warning: read this.")
+
+    def test_fake_bold_becomes_real_markdown_bold(self):
+        result = m.replace_unsupported_glyphs(self.FAKE_BOLD_TEST + ": the rest")
+        self.assertEqual(result, "**Test**: the rest")
+
+    def test_fake_italic_becomes_real_markdown_italic(self):
+        self.assertEqual(m.replace_unsupported_glyphs(self.FAKE_ITALIC_A), "*A*")
+
+    def test_styled_phrase_becomes_one_emphasis_span(self):
+        # Spaces between styled words stay inside the run, so the phrase gets
+        # one pair of markers instead of one pair per word.
+        text = self.FAKE_BOLD_TEST + " " + self.FAKE_BOLD_TEST
+        self.assertEqual(m.replace_unsupported_glyphs(text), "**Test Test**")
+
+    def test_no_emphasis_markers_inside_fenced_code_block(self):
+        # Markdown is not parsed inside a fence, so '**' would be printed
+        # literally; the letters must still be un-styled, though.
+        text = "```\n\U0001F4CC " + self.FAKE_BOLD_TEST + "\n```"
+        self.assertEqual(m.replace_unsupported_glyphs(text), "```\nTest\n```")
+
+    def test_indentation_inside_fence_is_preserved(self):
+        text = "```\n    \U0001F680 indented code\n```"
+        self.assertEqual(m.replace_unsupported_glyphs(text), "```\n    indented code\n```")
+
+    def test_operators_and_arrows_are_left_alone(self):
+        text = "DB→front-end, a ≈ b, x ≠ y, n ≤ 10"
+        self.assertEqual(m.replace_unsupported_glyphs(text), text)
+
+    def test_plain_text_is_returned_unchanged(self):
+        text = "# Titolo\n\nUn paragrafo **gia' in grassetto**, con due spazi  \nfinali."
+        self.assertEqual(m.replace_unsupported_glyphs(text), text)
+
+
 class TestSlugify(unittest.TestCase):
     def test_basic_text(self):
         self.assertEqual(m.slugify("Ciao Mondo"), "ciao-mondo")

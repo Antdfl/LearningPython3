@@ -29,7 +29,7 @@ utilities/build_md_toc.py
 import sys, re, unicodedata, os
 from pathlib import Path
 
-from md_shared import strip_md_toc
+from md_shared import replace_unsupported_glyphs, strip_md_toc
 
 
 # ── Helper comments section ──
@@ -1403,7 +1403,13 @@ def main():
     needs_html = choice in ['H', 'P', 'A']
     body_html = None
     if needs_html and MARKDOWN_AVAILABLE:
-        body_html = convert_to_html(md_text)
+        # Emoji and "fake bold" Unicode letters are dropped/rewritten for the
+        # HTML and PDF outputs only - see replace_unsupported_glyphs for why
+        # xhtml2pdf cannot draw them. The DOCX path below deliberately keeps
+        # them: Word substitutes a font per missing glyph (Segoe UI Symbol /
+        # Segoe UI Emoji), so there they render correctly and removing them
+        # would only throw away content.
+        body_html = convert_to_html(replace_unsupported_glyphs(md_text))
         body_html = shrink_wide_tables(body_html)
 
 
@@ -1494,8 +1500,13 @@ def main():
 
         title_box_html = ''
         if doc_title:
-            subtitle_html = f'<div class="doc-subtitle">{doc_subtitle}</div>' if doc_subtitle else ''
-            title_box_html = f'<h1 class="doc-title">{doc_title}</h1>{subtitle_html}'
+            # Same treatment as the body above: the title/subtitle are written
+            # straight into the HTML, so an emoji in them would reach the PDF
+            # as a box. The DOCX keeps the originals.
+            html_title = replace_unsupported_glyphs(doc_title)
+            html_subtitle = replace_unsupported_glyphs(doc_subtitle) if doc_subtitle else ''
+            subtitle_html = f'<div class="doc-subtitle">{html_subtitle}</div>' if doc_subtitle else ''
+            title_box_html = f'<h1 class="doc-title">{html_title}</h1>{subtitle_html}'
 
         html_doc = f"""<!DOCTYPE html>
 <html lang="en">

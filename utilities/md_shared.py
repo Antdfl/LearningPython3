@@ -8,6 +8,7 @@ DOCX), kept dependency-free so importing either script doesn't drag in the
 other's third-party libraries (markdown, xhtml2pdf, python-docx).
 """
 import re
+import unicodedata
 
 
 def strip_md_toc(md_text):
@@ -129,3 +130,129 @@ def strip_md_toc(md_text):
 
     result_lines = lines[:toc_start_idx] + lines[toc_end_idx + 1:]
     return '\n'.join(result_lines)
+
+
+_FENCE_LINE_RE = re.compile(r'^(```|~~~)')
+
+# Unicode ranges holding pictographic characters (emoji). Deliberately NOT a
+# single sweeping "everything above U+2100" rule: real documents use
+# Mathematical Operators (=, /=, <=) and Arrows (DB->front-end) as ordinary
+# text, and those blocks sit right between the pictographic ones.
+_EMOJI_CHARS = (
+    '\U0001F000-\U0001FAFF'  # emoticons, pictographs, transport, flags, supplemental symbols
+    '\u2600-\u27BF'          # Miscellaneous Symbols + Dingbats (warning sign, check mark, cross mark)
+    '\u2B00-\u2BFF'          # Miscellaneous Symbols and Arrows (star, filled square)
+    '\u231A-\u23FA'          # watch/hourglass/alarm-clock subset of Miscellaneous Technical
+)
+
+# The invisible characters that glue an emoji sequence together: U+FE0F
+# (variation selector, the "render this as an emoji" flag), U+200D (zero-width
+# joiner, used by composed emoji) and U+20E3 (combining keycap). Written as
+# escapes on purpose - as literals they would be unreadable in the source.
+_EMOJI_GLUE = '\uFE0F\u200D\u20E3'
+
+# One emoji "run": consecutive pictographs with their glue characters, plus any
+# spaces that FOLLOW them, so removing the emoji does not leave a double space
+# behind. Whitespace BEFORE the run is deliberately left alone: eating it would
+# destroy the indentation of a code line that happens to start with an emoji.
+_EMOJI_RUN_RE = re.compile(f'(?:[{_EMOJI_CHARS}][{_EMOJI_GLUE}]*)+[ \t]*')
+
+# Mathematical Alphanumeric Symbols (U+1D400-U+1D7FF): the "fake bold/italic"
+# letters produced by LinkedIn text generators, since LinkedIn itself strips
+# Markdown. A run keeps single spaces between styled words, so a whole styled
+# phrase becomes ONE emphasis span instead of one per word.
+_MATH_ALNUM_RUN_RE = re.compile(
+    r'[\U0001D400-\U0001D7FF]+(?: +[\U0001D400-\U0001D7FF]+)*'
+)
+
+
+def _unstyle_math_alnum(line, emphasis):
+    """Rewrites "fake bold/italic" Mathematical Alphanumeric Symbols as plain
+    ASCII, optionally wrapped in the equivalent Markdown emphasis markers.
+
+    The conversion itself is just NFKC normalization: every character in the
+    block carries a compatibility decomposition back to its plain letter or
+    digit (U+1D5E7 MATHEMATICAL SANS-SERIF BOLD CAPITAL T -> 'T'). The style
+    is recovered from the character's own Unicode name, which spells out
+    'BOLD' and/or 'ITALIC', so no hand-maintained table of the block's 14
+    sub-ranges is needed.
+
+    Args:
+        line (str): A single line of Markdown text.
+        emphasis (bool): True to wrap the recovered text in Markdown emphasis
+            markers (**bold**, *italic*, ***bold italic***). Must be False
+            inside a fenced code block, where Markdown is not parsed and the
+            asterisks would show up literally in the output.
+
+    Returns:
+        str: The line with every styled run replaced by plain text.
+    """
+    def replace_run(match):
+        plain = unicodedata.normalize('NFKC', match.group(0))
+        if not emphasis:
+            return plain
+        # A styled run is homogeneous in practice, so the first character's
+        # name describes the whole run.
+        name = unicodedata.name(match.group(0)[0], '')
+        marker = ('**' if 'BOLD' in name else '') + ('*' if 'ITALIC' in name else '')
+        return f'{marker}{plain}{marker}' if marker else plain
+
+    return _MATH_ALNUM_RUN_RE.sub(replace_run, line)
+
+
+def replace_unsupported_glyphs(md_text):
+    """Removes emoji and converts "fake bold" Unicode letters to real Markdown,
+    so neither of them renders as an empty box in the generated PDF.
+
+    WHY THIS EXISTS: xhtml2pdf draws text through ReportLab, which can only
+    render monochrome outline glyphs taken from the ONE font matched by the
+    CSS 'font-family'. Two consequences, both confirmed on a real document:
+
+    1. Emoji are impossible, not just unstyled. Windows' colour emoji font
+       (Segoe UI Emoji) stores its glyphs as colour bitmaps, a format
+       ReportLab cannot draw at all - so no font-family change fixes this.
+    2. ReportLab does not fall back to another font per missing character the
+       way a browser does. If the matched font lacks a glyph, the result is a
+       box, regardless of the fallback families listed after it in the CSS.
+
+    Since the characters cannot be drawn, they are removed or rewritten here
+    instead, before the Markdown ever reaches the converter:
+
+    - Emoji are dropped, together with any spaces immediately after them, so
+      "[rocket] THE RULE:" becomes "THE RULE:" and not " THE RULE:".
+    - Mathematical Alphanumeric Symbols - the Unicode "fake bold" used to
+      emphasise text on platforms that strip Markdown, such as LinkedIn - are
+      converted back to plain letters. OUTSIDE a fenced code block they are
+      wrapped in real Markdown emphasis, so the PDF shows genuine bold text
+      instead of boxes; INSIDE a fence the markers are omitted, because
+      Markdown is not parsed there and '**' would be printed literally.
+
+    Characters that merely look decorative but are ordinary text are left
+    untouched: mathematical operators (=, /=, <=), arrows, dashes and typographic
+    quotes all render normally in the PDF fonts.
+
+    Args:
+        md_text (str): The raw Markdown content string.
+
+    Returns:
+        str: The same Markdown with unrenderable characters removed or
+            rewritten. Text containing none of them is returned unchanged.
+    """
+    out_lines = []
+    in_fence = False
+
+    for line in md_text.split('\n'):
+        if _FENCE_LINE_RE.match(line.lstrip()):
+            in_fence = not in_fence
+            out_lines.append(line)
+            continue
+
+        cleaned = _EMOJI_RUN_RE.sub('', line)
+        if cleaned != line:
+            # An emoji sitting at the end of a line leaves trailing spaces
+            # behind. Only lines that actually had one are stripped, so a
+            # deliberate two-space Markdown line break elsewhere survives.
+            cleaned = cleaned.rstrip()
+        out_lines.append(_unstyle_math_alnum(cleaned, emphasis=not in_fence))
+
+    return '\n'.join(out_lines)
