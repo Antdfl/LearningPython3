@@ -17,7 +17,9 @@ utilities/build_md_toc.py
 
 # Conversion Menu:
 # H = HTML only (.html)
-# P = PDF only (.pdf): Requires xhtml2pdf and relies on the generated HTML structure.
+# P = PDF only (.pdf): professional layout (cover, TOC with page numbers, footer,
+# bookmarks) via md_pdf_pro.py + Chrome/Edge (playwright, pypdf); falls back to
+# xhtml2pdf with the plain layout if playwright is not installed.
 # W = Word only (.docx): Uses advanced DOCX XML manipulation for full functionality.
 # A = All three formats: Executes all supported conversions sequentially.
 
@@ -25,11 +27,13 @@ utilities/build_md_toc.py
 # - markdown: Core Markdown parser.
 # - xhtml2pdf: For PDF conversion from HTML.
 # - python-docx: For Word document creation and XML manipulation.
+# - playwright, pypdf (optional): professional PDF via the installed Chrome/Edge.
 """
 import sys, re, unicodedata, os
 from pathlib import Path
 
 from md_shared import replace_unsupported_glyphs, strip_md_toc
+import md_pdf_pro
 
 
 # ── Helper comments section ──
@@ -300,6 +304,29 @@ def soften_long_code_tokens(html_content):
         return f'<code>{softened}</code>'
 
     return re.sub(r'<code>(.*?)</code>', repl, html_content, flags=re.S)
+
+
+def convert_to_html_modern(md_text):
+    """Markdown to HTML for the Chrome-based PDF renderer (md_pdf_pro).
+
+    Unlike convert_to_html(), none of the xhtml2pdf workarounds are applied
+    (no <pre> rewriting, no hair spaces): a real browser wraps and keeps line
+    breaks correctly on its own. Code blocks are syntax-highlighted when
+    Pygments is installed.
+
+    Args:
+        md_text (str): Raw Markdown content.
+
+    Returns:
+        str: HTML body.
+    """
+    extensions = ['tables', 'sane_lists', 'nl2br', 'fenced_code']
+    config = {}
+    if md_pdf_pro.PYGMENTS_AVAILABLE:
+        extensions.append('codehilite')
+        config['codehilite'] = {'noclasses': True, 'guess_lang': False}
+    return markdown.markdown(escape_false_headings(md_text),
+                             extensions=extensions, extension_configs=config)
 
 
 def convert_to_html(md_text):
@@ -1290,6 +1317,14 @@ def slugify(text):
     return text or 'section'
 
 
+OUTPUT_EXTENSIONS = ('.html', '.pdf', '.docx', '.md')
+
+
+def _with_ext(stem, ext):
+    """Append ext to stem; unlike Path.with_suffix it keeps dots already in the name."""
+    return stem.with_name(stem.name + ext)
+
+
 def main():
     # ── Interactive menu for choosing the output format ──
     print("\n" + "=" * 40)
@@ -1326,19 +1361,23 @@ def main():
     default_stem = src.with_suffix('').name
     output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip()
     stem = Path(output_name) if output_name else src.with_suffix('')
+    # A typed name may carry an output extension: drop only that one, so a
+    # version number such as "report_1.27" is kept intact.
+    if stem.suffix.lower() in OUTPUT_EXTENSIONS:
+        stem = stem.with_suffix('')
 
     # ── Determine output files and request confirmation ──
     # These paths must match exactly the ones used further down
-    # to save the files (stem.with_suffix(...)), otherwise the existence
+    # to save the files (_with_ext(stem, ...)), otherwise the existence
     # check looks in the wrong folder and fails to detect files to overwrite.
     target_files = []
 
     if choice in ['H', 'A']:
-        target_files.append(stem.with_suffix('.html'))
+        target_files.append(_with_ext(stem, '.html'))
     if choice in ['P', 'A']:
-        target_files.append(stem.with_suffix('.pdf'))
+        target_files.append(_with_ext(stem, '.pdf'))
     if choice in ['W', 'A']:
-        target_files.append(stem.with_suffix('.docx'))
+        target_files.append(_with_ext(stem, '.docx'))
 
     if not target_files:
         # Case where no output is selected (shouldn't happen given the earlier checks, but it's a safety measure)
@@ -1531,7 +1570,7 @@ def main():
     # ── Generate the files based on the user's choice ──
     if choice in ['H', 'A']:
         if html_doc is not None:
-            html_path = stem.with_suffix('.html')
+            html_path = _with_ext(stem, '.html')
             html_path.write_text(html_doc, encoding='utf-8')
             print(f"Generato: {html_path}")
         else:
@@ -1539,21 +1578,50 @@ def main():
             print("Generazione HTML saltata.")
 
     if choice in ['P', 'A']:
-        if html_doc is None:
+        pro_done = False
+        if MARKDOWN_AVAILABLE and md_pdf_pro.PRO_PDF_AVAILABLE:
+            print("Generazione PDF in stile professionale (Chrome/Edge)...")
+            meta = {k: v for k, v in frontmatter_fields.items()
+                    if k not in ('title', 'subtitle', 'eyebrow')}
+            footer_left = doc_title or ''
+            version = meta.get('versione') or meta.get('version')
+            if footer_left and version:
+                footer_left += f" · versione {version}"
+            try:
+                pro_done = md_pdf_pro.render_pdf(
+                    convert_to_html_modern(md_text), _with_ext(stem, '.pdf'),
+                    title=doc_title, subtitle=doc_subtitle, meta=meta,
+                    eyebrow=frontmatter_fields.get('eyebrow'),
+                    source_name=src.name, footer_left=footer_left,
+                )
+            except Exception as e:
+                print(f"PDF professionale non riuscito ({e}); uso il motore base.")
+            else:
+                if pro_done:
+                    print(f"Generato: {_with_ext(stem, '.pdf')}")
+                else:
+                    pro_done = True  # write error already reported; no fallback
+        elif MARKDOWN_AVAILABLE:
+            print("Per il PDF in stile professionale: pip install playwright pypdf "
+                  "(usa Chrome/Edge gia' installato). Uso il motore base xhtml2pdf.")
+
+        if pro_done:
+            pass
+        elif html_doc is None:
             _missing('markdown')
             print("Generazione PDF saltata.")
         elif not XHTML2PDF_AVAILABLE:
             _missing('xhtml2pdf')
             print("Generazione PDF saltata.")
         else:
-            pdf_path = stem.with_suffix('.pdf')
+            pdf_path = _with_ext(stem, '.pdf')
             if html_to_pdf(html_doc, pdf_path):
                 print(f"Generato: {pdf_path}")
 
     # The Word conversion uses the already-processed text (TOC removed from the source markdown)
     if choice in ['W', 'A']:
         if DOCX_AVAILABLE:
-            word_path = stem.with_suffix('.docx')
+            word_path = _with_ext(stem, '.docx')
             if create_word_from_md(md_text, word_path, doc_title=doc_title, doc_subtitle=doc_subtitle):
                 print(f"Generato: {word_path}")
         else:

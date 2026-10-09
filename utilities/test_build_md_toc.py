@@ -130,6 +130,35 @@ class TestConvertToHtml(unittest.TestCase):
         self.assertIn("<p>Some paragraph.</p>", html)
 
 
+class TestConvertToHtmlModern(unittest.TestCase):
+    def test_keeps_headings_and_tables_without_xhtml2pdf_workarounds(self):
+        html = m.convert_to_html_modern("# T\n\n| a | b |\n|---|---|\n| 1 | 2 |")
+        self.assertIn("<h1>T</h1>", html)
+        self.assertIn("<table>", html)
+        self.assertNotIn('class="codeblock"', html)
+
+    def test_long_code_token_is_not_softened(self):
+        token = "docs.oracle.com/en/database/oracle/x-y"
+        self.assertIn(token, m.convert_to_html_modern(f"`{token}`"))
+
+    def test_fenced_code_keeps_pre_block(self):
+        html = m.convert_to_html_modern("```sql\nSELECT 1;\n```")
+        self.assertIn("<pre", html)
+        self.assertNotIn('class="codeblock"', html)
+
+    def test_false_heading_is_escaped(self):
+        self.assertNotIn("<h2>", m.convert_to_html_modern("#2 non e' un titolo"))
+
+
+class TestWithExt(unittest.TestCase):
+    def test_keeps_version_number_dots(self):
+        stem = Path("dir") / "Report_DE_1.27"
+        self.assertEqual(m._with_ext(stem, ".pdf").name, "Report_DE_1.27.pdf")
+
+    def test_plain_stem(self):
+        self.assertEqual(m._with_ext(Path("a"), ".docx").name, "a.docx")
+
+
 class TestMainGuard(unittest.TestCase):
     def test_main_is_defined_but_not_run_on_import(self):
         # Importing the module must not trigger the interactive menu
