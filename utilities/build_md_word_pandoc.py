@@ -29,8 +29,8 @@ utilities/build_md_word_pandoc.py
 #    script's folder.
 # 3. Prompts for an output filename and, if that file already exists, asks
 #    for overwrite confirmation before continuing.
-# 4. Reads the source file as UTF-8, falling back to cp1252 if decoding
-#    fails.
+# 4. Reads the source file as UTF-8 (BOM-tolerant, via utf-8-sig), falling back to
+#    cp1252 if decoding fails.
 # 5. Strips any existing hand-written TOC from the Markdown before Pandoc
 #    generates its own (--toc), to avoid a duplicated TOC.
 # 6. Writes the stripped Markdown to a temporary file in the SAME folder as
@@ -65,19 +65,29 @@ DEFAULT_REFERENCE_DOCX = SCRIPT_DIR / 'reference.docx'
 
 def main():
     """
-    This function acts as a wrapper around the Pandoc CLI utility to convert Markdown (.md) files into professional Word (.docx) documents. It handles complex tasks like generating Table of Contents, embedding images, and styling the output using a specified reference DOCX template. The script orchestrates the entire conversion process by managing file paths, calling Pandoc with specific flags, and handling potential errors during the external execution.
+    This function is a thin wrapper around the Pandoc CLI that converts Markdown
+    files into Word documents. It exists so you can call Pandoc from Python
+    without writing subprocess boilerplate yourself, and it handles interactive
+    prompts for output filenames and overwrite confirmation.
 
     Parameters:
-        None (The function accepts no explicit parameters).
+        None
 
     Returns:
-        None (The function returns nothing; success/failure is communicated via exit codes or print statements).
+        None (exits with status 1 if pandoc is missing, the source file or template
+        cannot be found, or Pandoc fails; exits with status 0 when the user declines to
+        overwrite an existing output file.)
     """
+    # Pandoc is an external binary that must be installed and on PATH; this script
+    # looks it up via shutil.which rather than assuming it exists.
     pandoc_exe = shutil.which('pandoc')
     if not pandoc_exe:
         print("Pandoc non trovato nel PATH. Installalo da https://pandoc.org/installing.html")
         sys.exit(1)
 
+    # The first command-line argument is the source .md file to convert. Relative
+    # paths are resolved against this script's folder, not the current working
+    # directory.
     arg = sys.argv[1] if len(sys.argv) > 1 else 'text_to_convert.md'
     src = Path(arg)
     if not src.is_absolute():
@@ -86,6 +96,8 @@ def main():
         print(f"File non trovato: {src}")
         sys.exit(1)
 
+    # The optional second argument selects the Word template that controls fonts and
+    # styles of the generated output. Falls back to a default reference document.
     ref_arg = sys.argv[2] if len(sys.argv) > 2 else str(DEFAULT_REFERENCE_DOCX)
     reference_docx = Path(ref_arg)
     if not reference_docx.is_absolute():
@@ -94,6 +106,8 @@ def main():
         print(f"reference.docx non trovato: {reference_docx}")
         sys.exit(1)
 
+    # The default output name is the source file's name without its extension, shown
+    # as the prompt default when no explicit base name is given by the user.
     default_stem = src.with_suffix('').name
     output_name = input(f"\nNome base del file di output [{default_stem}]: ").strip()
     stem = Path(output_name) if output_name else src.with_suffix('')
@@ -101,6 +115,8 @@ def main():
         stem = SCRIPT_DIR / stem
     output_path = stem.parent / f"{stem.name}.docx"
 
+    # Asks before overwriting an existing output file; the default answer is N so a
+    # stray Enter never destroys an existing file.
     if output_path.exists():
         confirmation = input(
             f"\n{output_path.name} esiste gia'. Sovrascrivere? (S/N) [Default N]: "
@@ -110,6 +126,8 @@ def main():
             sys.exit(0)
 
     print("\nLettura del file Markdown in corso...")
+    # 'utf-8-sig' also accepts a leading BOM; if decoding still fails, fall back to
+    # cp1252.
     try:
         md_text = src.read_text(encoding='utf-8-sig')
     except UnicodeDecodeError:
@@ -127,6 +145,9 @@ def main():
     tmp_md.write_text(md_text, encoding='utf-8')
 
     try:
+        # --toc and --toc-depth=3 build a table of contents up to heading level 3,
+        # --number-sections numbers the headings, and --reference-doc applies the
+        # template styles from reference.docx.
         print("Conversione con Pandoc in corso...")
         result = subprocess.run(
             [
@@ -147,9 +168,12 @@ def main():
             cwd=str(src.parent),
             capture_output=True, text=True,
         )
+    # The temporary .md file is removed whether Pandoc succeeded or failed.
     finally:
         tmp_md.unlink(missing_ok=True)
 
+    # A non-zero exit code means Pandoc failed; its stderr is shown and the script
+    # exits with status 1.
     if result.returncode != 0:
         print("Errore nella conversione con Pandoc:")
         print(result.stderr)
